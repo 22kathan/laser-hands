@@ -1,0 +1,701 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Cat's Cradle — Laser Hands</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+
+    body {
+      overflow: hidden;
+      background: #0a0a1a;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    #main-canvas {
+      display: block;
+      width: 100vw;
+      height: 100vh;
+    }
+
+    /* Hidden video element — we only read pixels from it */
+    #webcam {
+      position: absolute;
+      top: 0; left: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+
+    /* ── CRT Scanline overlay ── */
+    #crt-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 10;
+      background: repeating-linear-gradient(
+        to bottom,
+        transparent 0px,
+        transparent 2px,
+        rgba(0, 0, 0, 0.08) 2px,
+        rgba(0, 0, 0, 0.08) 4px
+      );
+      mix-blend-mode: multiply;
+    }
+
+    /* Subtle vignette */
+    #vignette {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 11;
+      background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.6) 100%);
+    }
+
+    /* ── Startup splash ── */
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      background: #0a0a1a;
+      transition: opacity 0.8s ease;
+    }
+    #splash.hidden { opacity: 0; pointer-events: none; }
+
+    #splash h1 {
+      font-size: 2.4rem;
+      font-weight: 700;
+      background: linear-gradient(90deg, #00ffe5, #ff00ff, #ffe600);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 0.6rem;
+      letter-spacing: 2px;
+    }
+    #splash p {
+      color: rgba(255,255,255,0.5);
+      font-size: 0.95rem;
+      margin-bottom: 2rem;
+    }
+    #start-btn {
+      padding: 14px 44px;
+      font-size: 1rem;
+      font-weight: 600;
+      border: none;
+      border-radius: 999px;
+      cursor: pointer;
+      color: #0a0a1a;
+      background: linear-gradient(135deg, #00ffe5, #ff00ff);
+      box-shadow: 0 0 30px rgba(0,255,229,0.3), 0 0 60px rgba(255,0,255,0.15);
+      transition: transform 0.2s, box-shadow 0.2s;
+    }
+    #start-btn:hover {
+      transform: scale(1.06);
+      box-shadow: 0 0 40px rgba(0,255,229,0.5), 0 0 80px rgba(255,0,255,0.25);
+    }
+
+    /* ── HUD status ── */
+    #hud {
+      position: fixed;
+      top: 16px; left: 20px;
+      z-index: 20;
+      color: rgba(255,255,255,0.35);
+      font-size: 0.75rem;
+      font-family: 'Consolas', monospace;
+      letter-spacing: 1px;
+      pointer-events: none;
+    }
+    #hud .dot {
+      display: inline-block;
+      width: 7px; height: 7px;
+      border-radius: 50%;
+      margin-right: 6px;
+      vertical-align: middle;
+      background: #00ffe5;
+      box-shadow: 0 0 6px #00ffe5;
+      animation: blink 1.8s infinite;
+    }
+    @keyframes blink {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.3; }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Splash Screen -->
+  <div id="splash">
+    <h1>LASER HANDS</h1>
+    <p>Cat's Cradle — Interactive Hand Tracking</p>
+    <button id="start-btn">LAUNCH EXPERIENCE</button>
+  </div>
+
+  <!-- Overlays -->
+  <div id="crt-overlay"></div>
+  <div id="vignette"></div>
+
+  <!-- HUD -->
+  <div id="hud" style="display:none;">
+    <span class="dot"></span>TRACKING ACTIVE
+  </div>
+
+  <!-- Hidden video -->
+  <video id="webcam" autoplay playsinline></video>
+
+  <!-- Main rendering canvas -->
+  <canvas id="main-canvas"></canvas>
+
+  <!-- MediaPipe Hands via CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils@0.3.1675466862/camera_utils.min.js"></script>
+
+  <script>
+  (() => {
+    "use strict";
+
+    /* ────────────────────────────────────────────
+       Constants & Config
+    ──────────────────────────────────────────── */
+    const FINGERTIP_IDS  = [4, 8, 12, 16, 20];   // thumb, index, middle, ring, pinky
+    const JOINT_IDS      = [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20];
+    const PALM_IDS       = [0, 1, 5, 9, 13, 17];  // wrist + knuckle bases
+    const FINGER_CHAINS  = [
+      [0,1,2,3,4],       // thumb
+      [0,5,6,7,8],       // index
+      [0,9,10,11,12],    // middle
+      [0,13,14,15,16],   // ring
+      [0,17,18,19,20],   // pinky
+    ];
+
+    const COLORS = {
+      cyan:    { r: 0,   g: 255, b: 229 },
+      magenta: { r: 255, g: 0,   b: 255 },
+      yellow:  { r: 255, g: 230, b: 0   },
+      white:   { r: 255, g: 255, b: 255 },
+    };
+    const PALETTE = [COLORS.cyan, COLORS.magenta, COLORS.yellow, COLORS.cyan, COLORS.magenta];
+
+    const TOUCH_DIST_THRESHOLD = 0.04;  // normalised distance for "touch"
+    const MAX_PARTICLES = 300;
+
+    /* ────────────────────────────────────────────
+       State
+    ──────────────────────────────────────────── */
+    let leftHand  = null;   // landmarks array (21 points)
+    let rightHand = null;
+    let particles = [];
+    let frameTime = 0;
+    let activeBeamCount = 0;
+
+    /* ────────────────────────────────────────────
+       Audio system (Web Audio API — procedural)
+    ──────────────────────────────────────────── */
+    let audioCtx    = null;
+    let humGain     = null;   // master gain for ambient hum
+    let humOsc1     = null;   // low sine drone
+    let humOsc2     = null;   // higher harmonic
+    let humFilter   = null;   // low-pass to keep it soft
+    let zapCooldowns = [0, 0, 0, 0, 0]; // per-finger cooldown timestamps
+
+    function initAudio() {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+      // ── Ambient hum chain: osc → filter → gain → destination ──
+      humFilter = audioCtx.createBiquadFilter();
+      humFilter.type = 'lowpass';
+      humFilter.frequency.value = 300;
+      humFilter.Q.value = 2;
+
+      humGain = audioCtx.createGain();
+      humGain.gain.value = 0;  // starts silent
+
+      // Drone oscillator 1 — low sine
+      humOsc1 = audioCtx.createOscillator();
+      humOsc1.type = 'sine';
+      humOsc1.frequency.value = 80;
+      humOsc1.connect(humFilter);
+      humOsc1.start();
+
+      // Drone oscillator 2 — soft triangle harmonic
+      humOsc2 = audioCtx.createOscillator();
+      humOsc2.type = 'triangle';
+      humOsc2.frequency.value = 160;
+      const osc2Gain = audioCtx.createGain();
+      osc2Gain.gain.value = 0.3;
+      humOsc2.connect(osc2Gain);
+      osc2Gain.connect(humFilter);
+      humOsc2.start();
+
+      humFilter.connect(humGain);
+      humGain.connect(audioCtx.destination);
+    }
+
+    /** Smoothly adjust the ambient hum based on active beam count (0-5) */
+    function updateHum(count) {
+      if (!audioCtx || !humGain) return;
+      const t = audioCtx.currentTime;
+      // Volume: 0 when no beams, soft max ~0.07 at 5 beams
+      const targetVol = Math.min(count * 0.014, 0.07);
+      humGain.gain.linearRampToValueAtTime(targetVol, t + 0.15);
+      // Pitch shifts up slightly with more beams
+      const basePitch = 80 + count * 8;
+      humOsc1.frequency.linearRampToValueAtTime(basePitch, t + 0.15);
+      humOsc2.frequency.linearRampToValueAtTime(basePitch * 2, t + 0.15);
+      // Open filter more with more beams
+      humFilter.frequency.linearRampToValueAtTime(200 + count * 60, t + 0.15);
+    }
+
+    /** Play a short laser-zap sound at a given pitch colour index */
+    function playZap(colorIdx) {
+      if (!audioCtx) return;
+      const now = audioCtx.currentTime;
+
+      // Cooldown: don't re-trigger for same finger within 250ms
+      if (now - zapCooldowns[colorIdx] < 0.25) return;
+      zapCooldowns[colorIdx] = now;
+
+      // Base pitches per finger for variety
+      const pitches = [520, 660, 784, 880, 1047];
+      const freq = pitches[colorIdx];
+
+      // Short sine blip
+      const osc = audioCtx.createOscillator();
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.5, now + 0.18);
+
+      const gain = audioCtx.createGain();
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+      // Slight reverb-like tail via delay
+      const delay = audioCtx.createDelay();
+      delay.delayTime.value = 0.06;
+      const delayGain = audioCtx.createGain();
+      delayGain.gain.value = 0.3;
+
+      osc.connect(gain);
+      gain.connect(audioCtx.destination);
+      gain.connect(delay);
+      delay.connect(delayGain);
+      delayGain.connect(audioCtx.destination);
+
+      osc.start(now);
+      osc.stop(now + 0.25);
+    }
+
+    /* ────────────────────────────────────────────
+       DOM refs
+    ──────────────────────────────────────────── */
+    const video     = document.getElementById("webcam");
+    const canvas    = document.getElementById("main-canvas");
+    const ctx       = canvas.getContext("2d");
+    const splash    = document.getElementById("splash");
+    const startBtn  = document.getElementById("start-btn");
+    const hud       = document.getElementById("hud");
+
+    /* ────────────────────────────────────────────
+       Resize
+    ──────────────────────────────────────────── */
+    function resize() {
+      canvas.width  = window.innerWidth;
+      canvas.height = window.innerHeight;
+    }
+    window.addEventListener("resize", resize);
+    resize();
+
+    /* ────────────────────────────────────────────
+       MediaPipe setup
+    ──────────────────────────────────────────── */
+    function initMediaPipe() {
+      const hands = new Hands({
+        locateFile: (file) =>
+          `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${file}`,
+      });
+
+      hands.setOptions({
+        maxNumHands: 2,
+        modelComplexity: 1,
+        minDetectionConfidence: 0.7,
+        minTrackingConfidence: 0.6,
+      });
+
+      hands.onResults(onResults);
+
+      const camera = new Camera(video, {
+        onFrame: async () => {
+          await hands.send({ image: video });
+        },
+        width: 1280,
+        height: 720,
+      });
+      camera.start();
+    }
+
+    /* ────────────────────────────────────────────
+       MediaPipe results callback
+    ──────────────────────────────────────────── */
+    function onResults(results) {
+      leftHand  = null;
+      rightHand = null;
+
+      if (results.multiHandLandmarks && results.multiHandedness) {
+        for (let i = 0; i < results.multiHandLandmarks.length; i++) {
+          const label = results.multiHandedness[i].label;
+          // Mirror: MediaPipe "Left" is viewer's right in mirrored feed
+          if (label === "Left")  rightHand = results.multiHandLandmarks[i];
+          if (label === "Right") leftHand  = results.multiHandLandmarks[i];
+        }
+      }
+    }
+
+    /* ────────────────────────────────────────────
+       Coordinate helpers
+    ──────────────────────────────────────────── */
+    function lm(hand, id) {
+      const p = hand[id];
+      // Mirror X so it feels natural
+      return { x: (1 - p.x) * canvas.width, y: p.y * canvas.height, z: p.z };
+    }
+
+    function dist2D(a, b) {
+      const dx = a.x - b.x, dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    function normDist(handA, idA, handB, idB) {
+      const a = handA[idA], b = handB[idB];
+      const dx = a.x - b.x, dy = a.y - b.y;
+      return Math.sqrt(dx * dx + dy * dy);
+    }
+
+    // Landmark-space distance (normalised coords)
+    function lmDist(hand, idA, idB) {
+      const a = hand[idA], b = hand[idB];
+      const dx = a.x - b.x, dy = a.y - b.y, dz = a.z - b.z;
+      return Math.sqrt(dx * dx + dy * dy + dz * dz);
+    }
+
+    // Finger indices:  0 = thumb, 1 = index, 2 = middle, 3 = ring, 4 = pinky
+    // Tip IDs:         4,  8, 12, 16, 20
+    // PIP / IP IDs:    3,  6, 10, 14, 18   (IP for thumb)
+    // MCP IDs:         2,  5,  9, 13, 17
+    const FINGER_PIP_IDS = [3, 6, 10, 14, 18];
+    const FINGER_MCP_IDS = [2, 5, 9, 13, 17];
+
+    /**
+     * Returns true if a finger is extended (open), false if curled.
+     * For fingers 1-4: tip is farther from wrist than the PIP joint.
+     * For thumb (0): measures the bend angle at the IP joint (landmark 3).
+     *   Extended = angle at IP joint > ~150° (nearly straight).
+     *   Curled   = angle is much smaller (thumb folded in).
+     */
+    function isFingerExtended(hand, fingerIdx) {
+      const tipId = FINGERTIP_IDS[fingerIdx];
+      const pipId = FINGER_PIP_IDS[fingerIdx];
+      if (fingerIdx === 0) {
+        // Thumb: angle-based check at IP joint (landmark 3)
+        const a = hand[2]; // MCP
+        const b = hand[3]; // IP
+        const c = hand[4]; // Tip
+        // Vectors b→a and b→c
+        const bax = a.x - b.x, bay = a.y - b.y, baz = a.z - b.z;
+        const bcx = c.x - b.x, bcy = c.y - b.y, bcz = c.z - b.z;
+        const dot = bax * bcx + bay * bcy + baz * bcz;
+        const magBA = Math.sqrt(bax * bax + bay * bay + baz * baz);
+        const magBC = Math.sqrt(bcx * bcx + bcy * bcy + bcz * bcz);
+        if (magBA === 0 || magBC === 0) return false;
+        const angle = Math.acos(Math.min(1, Math.max(-1, dot / (magBA * magBC))));
+        // angle ≈ π (3.14) when straight, smaller when curled
+        // Threshold ~150° = 2.618 rad
+        return angle > 2.6;
+      }
+      // Other fingers: tip farther from wrist than PIP
+      return lmDist(hand, tipId, 0) > lmDist(hand, pipId, 0);
+    }
+
+    /* ────────────────────────────────────────────
+       Particle system
+    ──────────────────────────────────────────── */
+    function spawnParticles(x, y, color, count = 18) {
+      for (let i = 0; i < count; i++) {
+        if (particles.length >= MAX_PARTICLES) particles.shift();
+        const angle = Math.random() * Math.PI * 2;
+        const speed = 1.5 + Math.random() * 4;
+        particles.push({
+          x, y,
+          vx: Math.cos(angle) * speed,
+          vy: Math.sin(angle) * speed,
+          life: 1.0,
+          decay: 0.015 + Math.random() * 0.025,
+          r: color.r, g: color.g, b: color.b,
+          size: 1.5 + Math.random() * 3,
+        });
+      }
+    }
+
+    function updateAndDrawParticles() {
+      for (let i = particles.length - 1; i >= 0; i--) {
+        const p = particles[i];
+        p.x += p.vx;
+        p.y += p.vy;
+        p.vy += 0.08;          // gentle gravity
+        p.vx *= 0.98;
+        p.life -= p.decay;
+        if (p.life <= 0) { particles.splice(i, 1); continue; }
+
+        const alpha = p.life;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.shadowColor = `rgba(${p.r},${p.g},${p.b},${alpha})`;
+        ctx.shadowBlur = 12;
+        ctx.fillStyle = `rgb(${p.r},${p.g},${p.b})`;
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+    }
+
+    /* ────────────────────────────────────────────
+       Drawing helpers
+    ──────────────────────────────────────────── */
+
+    // Glow dot on a joint
+    function drawJointDot(pos, color, radius = 5) {
+      ctx.save();
+      ctx.shadowColor = `rgb(${color.r},${color.g},${color.b})`;
+      ctx.shadowBlur = 18;
+      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.9)`;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius, 0, Math.PI * 2);
+      ctx.fill();
+      // Bright core
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = `rgba(255,255,255,0.85)`;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, radius * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Draw skeleton chain (finger bones) with soft glow
+    function drawSkeleton(hand, color) {
+      ctx.save();
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},0.25)`;
+      ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.4)`;
+      ctx.shadowBlur = 8;
+      ctx.lineWidth = 1.5;
+      for (const chain of FINGER_CHAINS) {
+        ctx.beginPath();
+        for (let j = 0; j < chain.length; j++) {
+          const p = lm(hand, chain[j]);
+          j === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+        }
+        ctx.stroke();
+      }
+      // palm outline
+      ctx.beginPath();
+      for (let j = 0; j < PALM_IDS.length; j++) {
+        const p = lm(hand, PALM_IDS[j]);
+        j === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
+      }
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // Laser beam between two points
+    function drawLaserBeam(a, b, color, distPx) {
+      const maxDist = canvas.width * 0.6;
+      const t = Math.min(distPx / maxDist, 1);  // 0 = close, 1 = far
+
+      // Thickness: thicker when close, thinner when far
+      const thickness = 3.5 - t * 2.5;
+      // Glow intensity
+      const glowSize = 26 - t * 16;
+      // Slight pulsation
+      const pulse = 0.85 + 0.15 * Math.sin(frameTime * 6 + a.x * 0.01);
+
+      ctx.save();
+
+      // Outer glow
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.25 - t * 0.15) * pulse})`;
+      ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.7)`;
+      ctx.shadowBlur = glowSize;
+      ctx.lineWidth = thickness + 4;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      // Slight elastic curve via quadratic bezier
+      const midX = (a.x + b.x) / 2;
+      const midY = (a.y + b.y) / 2 + distPx * 0.04 * Math.sin(frameTime * 3);
+      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
+      ctx.stroke();
+
+      // Inner bright core
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.9 - t * 0.4) * pulse})`;
+      ctx.shadowBlur = glowSize * 0.5;
+      ctx.lineWidth = thickness;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
+      ctx.stroke();
+
+      // Hot white center
+      ctx.strokeStyle = `rgba(255,255,255,${(0.6 - t * 0.4) * pulse})`;
+      ctx.shadowBlur = 4;
+      ctx.lineWidth = Math.max(thickness * 0.35, 0.5);
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    /* ────────────────────────────────────────────
+       Main render loop
+    ──────────────────────────────────────────── */
+    function render(timestamp) {
+      frameTime = timestamp * 0.001;
+      const W = canvas.width, H = canvas.height;
+
+      // ── Background: deep midnight blue gradient ──
+      const bg = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, W * 0.7);
+      bg.addColorStop(0, "#0e1628");
+      bg.addColorStop(1, "#060a14");
+      ctx.fillStyle = bg;
+      ctx.fillRect(0, 0, W, H);
+
+      // ── Draw subtle silhouette from video feed ──
+      if (video.readyState >= 2) {
+        ctx.save();
+        ctx.globalAlpha = 0.12;
+        ctx.translate(W, 0);
+        ctx.scale(-1, 1);  // mirror
+        ctx.drawImage(video, 0, 0, W, H);
+        ctx.restore();
+      }
+
+      // ── Draw hand skeletons (silhouettes) ──
+      if (leftHand) {
+        drawSkeleton(leftHand, COLORS.cyan);
+        for (const id of JOINT_IDS) {
+          const p = lm(leftHand, id);
+          const isTip = FINGERTIP_IDS.includes(id);
+          drawJointDot(p, COLORS.cyan, isTip ? 6 : 3);
+        }
+      }
+
+      if (rightHand) {
+        drawSkeleton(rightHand, COLORS.magenta);
+        for (const id of JOINT_IDS) {
+          const p = lm(rightHand, id);
+          const isTip = FINGERTIP_IDS.includes(id);
+          drawJointDot(p, COLORS.magenta, isTip ? 6 : 3);
+        }
+      }
+
+      // ── Laser beams between fingertips (only for OPEN fingers) ──
+      if (leftHand && rightHand) {
+        // Pre-compute which fingers are extended on each hand
+        const leftOpen  = FINGERTIP_IDS.map((_, i) => isFingerExtended(leftHand, i));
+        const rightOpen = FINGERTIP_IDS.map((_, i) => isFingerExtended(rightHand, i));
+
+        let beamsThisFrame = 0;
+
+        for (let i = 0; i < FINGERTIP_IDS.length; i++) {
+          // Only draw beam if the finger is open on BOTH hands
+          if (!leftOpen[i] || !rightOpen[i]) continue;
+
+          beamsThisFrame++;
+
+          const idL = FINGERTIP_IDS[i];
+          const idR = FINGERTIP_IDS[i];
+          const pL = lm(leftHand, idL);
+          const pR = lm(rightHand, idR);
+          const d  = dist2D(pL, pR);
+
+          drawLaserBeam(pL, pR, PALETTE[i], d);
+
+          // Particle explosion on touch + zap sound
+          const nDist = normDist(leftHand, idL, rightHand, idR);
+          if (nDist < TOUCH_DIST_THRESHOLD) {
+            const mx = (pL.x + pR.x) / 2;
+            const my = (pL.y + pR.y) / 2;
+            spawnParticles(mx, my, PALETTE[i], 6);
+            playZap(i);
+          }
+        }
+
+        activeBeamCount = beamsThisFrame;
+        updateHum(activeBeamCount);
+
+        // ── Bonus: cross-connect web for richer cradle look ──
+        // Only connect if both involved fingers are open
+        for (let i = 0; i < FINGERTIP_IDS.length - 1; i++) {
+          if (leftOpen[i] && rightOpen[i + 1]) {
+            const pL  = lm(leftHand,  FINGERTIP_IDS[i]);
+            const pR2 = lm(rightHand, FINGERTIP_IDS[i + 1]);
+            const d   = dist2D(pL, pR2);
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            drawLaserBeam(pL, pR2, PALETTE[i], d);
+            ctx.restore();
+          }
+
+          if (rightOpen[i] && leftOpen[i + 1]) {
+            const pR  = lm(rightHand, FINGERTIP_IDS[i]);
+            const pL2 = lm(leftHand,  FINGERTIP_IDS[i + 1]);
+            const d2  = dist2D(pR, pL2);
+            ctx.save();
+            ctx.globalAlpha = 0.3;
+            drawLaserBeam(pR, pL2, PALETTE[i], d2);
+            ctx.restore();
+          }
+        }
+      } else {
+        // No beams — fade hum to silence
+        if (activeBeamCount > 0) {
+          activeBeamCount = 0;
+          updateHum(0);
+        }
+      }
+
+      // ── Particles ──
+      updateAndDrawParticles();
+
+      requestAnimationFrame(render);
+    }
+
+    /* ────────────────────────────────────────────
+       Boot
+    ──────────────────────────────────────────── */
+    startBtn.addEventListener("click", async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 1280, height: 720, facingMode: "user" },
+          audio: false,
+        });
+        video.srcObject = stream;
+        await video.play();
+
+        splash.classList.add("hidden");
+        hud.style.display = "block";
+
+        initAudio();
+        initMediaPipe();
+        requestAnimationFrame(render);
+      } catch (err) {
+        alert("Camera access is required.\n\n" + err.message);
+      }
+    });
+  })();
+  </script>
+</body>
+</html>
