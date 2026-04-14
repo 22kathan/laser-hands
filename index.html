@@ -124,6 +124,194 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.3; }
     }
+
+    /* ── Draw-mode HUD (bottom center status) ── */
+    #draw-hud {
+      position: fixed;
+      bottom: 28px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 25;
+      display: none;
+      align-items: center;
+      gap: 14px;
+      padding: 8px 22px;
+      border-radius: 999px;
+      background: rgba(10, 10, 26, 0.65);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 0 30px rgba(100, 180, 255, 0.12);
+      font-family: 'Consolas', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 1.2px;
+      color: rgba(255,255,255,0.55);
+      pointer-events: none;
+      transition: opacity 0.4s ease;
+    }
+    #draw-hud.visible { display: flex; }
+    #draw-hud .color-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      flex-shrink: 0;
+    }
+    #draw-hud .mode-label { font-weight: 600; }
+
+    /* ── Draw canvas (persistent strokes) ── */
+    #draw-canvas {
+      position: fixed;
+      top: 0; left: 0;
+      width: 100vw;
+      height: 100vh;
+      pointer-events: none;
+      z-index: 1;
+    }
+
+    /* ── Settings gear button ── */
+    #settings-btn {
+      position: fixed;
+      bottom: 20px;
+      right: 20px;
+      z-index: 30;
+      display: none;
+      width: 44px; height: 44px;
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 50%;
+      background: rgba(10, 10, 26, 0.7);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      cursor: pointer;
+      font-size: 1.2rem;
+      line-height: 44px;
+      text-align: center;
+      color: rgba(255,255,255,0.5);
+      transition: transform 0.3s, box-shadow 0.3s, border-color 0.3s;
+      box-shadow: 0 0 16px rgba(100,180,255,0.08);
+    }
+    #settings-btn:hover {
+      transform: scale(1.1) rotate(30deg);
+      border-color: rgba(100,180,255,0.3);
+      box-shadow: 0 0 24px rgba(100,180,255,0.2);
+    }
+    #settings-btn.open {
+      transform: rotate(90deg);
+      border-color: rgba(100,180,255,0.4);
+    }
+
+    /* ── Settings panel ── */
+    #settings-panel {
+      position: fixed;
+      bottom: 76px;
+      right: 20px;
+      z-index: 30;
+      display: none;
+      flex-direction: column;
+      gap: 0;
+      width: 200px;
+      border-radius: 16px;
+      background: rgba(10, 10, 26, 0.82);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid rgba(255,255,255,0.08);
+      box-shadow: 0 8px 40px rgba(0,0,0,0.5), 0 0 30px rgba(100,180,255,0.06);
+      font-family: 'Consolas', monospace;
+      overflow: hidden;
+      transform-origin: bottom right;
+      animation: panelIn 0.2s ease-out;
+    }
+    #settings-panel.visible { display: flex; }
+    @keyframes panelIn {
+      from { opacity: 0; transform: scale(0.9) translateY(8px); }
+      to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .settings-section {
+      padding: 12px 16px;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    .settings-section:last-child { border-bottom: none; }
+
+    .settings-label {
+      font-size: 0.58rem;
+      letter-spacing: 1.5px;
+      color: rgba(255,255,255,0.25);
+      text-transform: uppercase;
+      margin-bottom: 8px;
+    }
+
+    /* Mode toggle buttons */
+    .mode-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 9px 12px;
+      border: 1px solid rgba(255,255,255,0.06);
+      border-radius: 10px;
+      background: transparent;
+      color: rgba(255,255,255,0.4);
+      font-family: 'Consolas', monospace;
+      font-size: 0.72rem;
+      letter-spacing: 0.8px;
+      cursor: pointer;
+      transition: all 0.2s;
+      margin-bottom: 6px;
+    }
+    .mode-btn:last-child { margin-bottom: 0; }
+    .mode-btn:hover {
+      background: rgba(255,255,255,0.04);
+      border-color: rgba(255,255,255,0.12);
+      color: rgba(255,255,255,0.6);
+    }
+    .mode-btn.active {
+      background: rgba(100,180,255,0.12);
+      border-color: rgba(100,180,255,0.35);
+      color: #64b4ff;
+      box-shadow: 0 0 12px rgba(100,180,255,0.1);
+    }
+    .mode-btn .icon { font-size: 0.9rem; width: 20px; text-align: center; }
+
+    /* Color dots row */
+    .color-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+    .color-pick {
+      width: 18px; height: 18px;
+      border-radius: 50%;
+      border: 2px solid transparent;
+      cursor: pointer;
+      transition: transform 0.15s, border-color 0.15s, box-shadow 0.15s;
+    }
+    .color-pick:hover { transform: scale(1.2); }
+    .color-pick.active {
+      border-color: #fff;
+      box-shadow: 0 0 10px currentColor;
+      transform: scale(1.15);
+    }
+
+    /* Action buttons */
+    .action-btn {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      width: 100%;
+      padding: 8px 12px;
+      border: none;
+      border-radius: 8px;
+      background: rgba(255,80,80,0.1);
+      color: rgba(255,120,120,0.7);
+      font-family: 'Consolas', monospace;
+      font-size: 0.68rem;
+      letter-spacing: 0.8px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    .action-btn:hover {
+      background: rgba(255,80,80,0.2);
+      color: rgba(255,120,120,0.9);
+    }
   </style>
 </head>
 <body>
@@ -144,8 +332,36 @@
     <span class="dot"></span>TRACKING ACTIVE
   </div>
 
+  <!-- Draw-mode status HUD -->
+  <div id="draw-hud">
+    <div class="color-dot" id="draw-color-dot"></div>
+    <span class="mode-label" id="draw-mode-label">⚡ LASER</span>
+  </div>
+
+  <!-- Settings gear button -->
+  <button id="settings-btn" title="Settings">⚙️</button>
+
+  <!-- Settings panel -->
+  <div id="settings-panel">
+    <div class="settings-section">
+      <div class="settings-label">Mode</div>
+      <button class="mode-btn active" id="mode-laser"><span class="icon">⚡</span> Laser Hands</button>
+      <button class="mode-btn" id="mode-write"><span class="icon">✏️</span> Writing Mode</button>
+    </div>
+    <div class="settings-section" id="color-section" style="display:none;">
+      <div class="settings-label">Pen Color</div>
+      <div class="color-row" id="color-row"></div>
+    </div>
+    <div class="settings-section" id="clear-section" style="display:none;">
+      <button class="action-btn" id="clear-btn">🗑️ Clear Canvas</button>
+    </div>
+  </div>
+
   <!-- Hidden video -->
   <video id="webcam" autoplay playsinline></video>
+
+  <!-- Persistent drawing canvas -->
+  <canvas id="draw-canvas"></canvas>
 
   <!-- Main rendering canvas -->
   <canvas id="main-canvas"></canvas>
@@ -192,6 +408,22 @@
     let frameTime = 0;
     let activeBeamCount = 0;
 
+    /* ── Drawing state ── */
+    const DRAW_COLORS = [
+      { r: 100, g: 180, b: 255, hex: '#64b4ff' },   // light blue (primary)
+      { r: 0,   g: 255, b: 229, hex: '#00ffe5' },   // neon cyan
+      { r: 255, g: 0,   b: 255, hex: '#ff00ff' },   // magenta
+      { r: 57,  g: 255, b: 20,  hex: '#39ff14' },   // neon green
+      { r: 255, g: 230, b: 0,   hex: '#ffe600' },   // neon yellow
+      { r: 255, g: 255, b: 255, hex: '#ffffff' },   // white
+    ];
+    let drawColorIdx   = 0;   // current color index
+    let drawMode       = 'laser';  // 'laser' | 'draw'
+    let appMode        = 'laser';  // UI-selected mode: 'laser' | 'write'
+    let isDrawing      = false;
+    let lastDrawPos    = null;   // for smooth interpolation
+    const ERASE_RADIUS = 28;
+
     /* ────────────────────────────────────────────
        Audio system (Web Audio API — procedural)
     ──────────────────────────────────────────── */
@@ -201,6 +433,14 @@
     let humOsc2     = null;   // higher harmonic
     let humFilter   = null;   // low-pass to keep it soft
     let zapCooldowns = [0, 0, 0, 0, 0]; // per-finger cooldown timestamps
+
+    // Pen-on-paper sound system
+    let penNoiseNode   = null;  // AudioBufferSourceNode (white noise)
+    let penFilter      = null;  // BandPassFilter — shapes the scratch
+    let penGain        = null;  // Master gain for pen sound
+    let penCrackleGain = null;  // Gain for micro-crackle layer
+    let penActive      = false; // Is pen sound currently playing?
+    let penSpeed       = 0;     // Current drawing speed (pixels/frame)
 
     function initAudio() {
       audioCtx = new (window.AudioContext || window.webkitAudioContext)();
@@ -233,6 +473,56 @@
 
       humFilter.connect(humGain);
       humGain.connect(audioCtx.destination);
+
+      // ── Pen-on-paper sound chain ──
+      // Create a looping white noise buffer (2 seconds)
+      const noiseDuration = 2;
+      const noiseFrames = audioCtx.sampleRate * noiseDuration;
+      const noiseBuffer = audioCtx.createBuffer(1, noiseFrames, audioCtx.sampleRate);
+      const noiseData = noiseBuffer.getChannelData(0);
+      for (let i = 0; i < noiseFrames; i++) {
+        // Shaped noise: mix of white noise + low-freq rumble for paper grain
+        noiseData[i] = (Math.random() * 2 - 1) * 0.7
+                      + (Math.random() * 2 - 1) * 0.3 * Math.sin(i * 0.002);
+      }
+
+      // Noise source (will be created fresh each time pen starts)
+      // Store the buffer for reuse
+      penNoiseNode = noiseBuffer;
+
+      // Band-pass filter: shapes white noise into scratchy pen sound
+      penFilter = audioCtx.createBiquadFilter();
+      penFilter.type = 'bandpass';
+      penFilter.frequency.value = 3500;  // centre freq — pen scratch lives ~2-5kHz
+      penFilter.Q.value = 0.8;           // fairly wide bandwidth
+
+      // Secondary high-shelf for brightness
+      const penShelf = audioCtx.createBiquadFilter();
+      penShelf.type = 'highshelf';
+      penShelf.frequency.value = 6000;
+      penShelf.gain.value = -6;  // tame the harshness
+
+      // Master pen gain (starts at 0)
+      penGain = audioCtx.createGain();
+      penGain.gain.value = 0;
+
+      // Crackle layer: a second filter path for paper-grain micro-impulses
+      penCrackleGain = audioCtx.createGain();
+      penCrackleGain.gain.value = 0;
+      const crackleFilter = audioCtx.createBiquadFilter();
+      crackleFilter.type = 'highpass';
+      crackleFilter.frequency.value = 5000;
+      crackleFilter.Q.value = 1.5;
+
+      // Wire up: filter → shelf → gain → destination
+      penFilter.connect(penShelf);
+      penShelf.connect(penGain);
+      penGain.connect(audioCtx.destination);
+
+      // Crackle path: filter → crackleFilter → crackleGain → destination
+      penFilter.connect(crackleFilter);
+      crackleFilter.connect(penCrackleGain);
+      penCrackleGain.connect(audioCtx.destination);
     }
 
     /** Smoothly adjust the ambient hum based on active beam count (0-5) */
@@ -290,21 +580,115 @@
     }
 
     /* ────────────────────────────────────────────
+       Pen-on-paper sound control
+    ──────────────────────────────────────────── */
+    let _penSourceNode = null;  // active noise source
+
+    /** Start the pen scratch sound */
+    function startPenSound() {
+      if (!audioCtx || !penNoiseNode || penActive) return;
+      penActive = true;
+
+      // Create a fresh source node from the stored buffer
+      _penSourceNode = audioCtx.createBufferSource();
+      _penSourceNode.buffer = penNoiseNode;
+      _penSourceNode.loop = true;
+      _penSourceNode.connect(penFilter);
+      _penSourceNode.start();
+
+      // Fade in
+      const t = audioCtx.currentTime;
+      penGain.gain.cancelScheduledValues(t);
+      penGain.gain.setValueAtTime(penGain.gain.value, t);
+      penGain.gain.linearRampToValueAtTime(0.045, t + 0.08);
+      penCrackleGain.gain.cancelScheduledValues(t);
+      penCrackleGain.gain.setValueAtTime(penCrackleGain.gain.value, t);
+      penCrackleGain.gain.linearRampToValueAtTime(0.015, t + 0.08);
+    }
+
+    /** Stop the pen scratch sound */
+    function stopPenSound() {
+      if (!audioCtx || !penActive) return;
+      penActive = false;
+
+      const t = audioCtx.currentTime;
+      // Fade out quickly
+      penGain.gain.cancelScheduledValues(t);
+      penGain.gain.setValueAtTime(penGain.gain.value, t);
+      penGain.gain.linearRampToValueAtTime(0, t + 0.12);
+      penCrackleGain.gain.cancelScheduledValues(t);
+      penCrackleGain.gain.setValueAtTime(penCrackleGain.gain.value, t);
+      penCrackleGain.gain.linearRampToValueAtTime(0, t + 0.12);
+
+      // Stop the source after fade
+      if (_penSourceNode) {
+        try { _penSourceNode.stop(t + 0.15); } catch(e) {}
+        _penSourceNode = null;
+      }
+    }
+
+    /** Update pen sound based on drawing speed (call every frame while drawing) */
+    function updatePenSound(speed) {
+      if (!audioCtx || !penActive) return;
+      const t = audioCtx.currentTime;
+
+      // Clamp speed: 0 = stationary, ~30+ = fast
+      const s = Math.min(speed, 40);
+      const norm = s / 40;  // 0..1
+
+      // Volume: louder when moving faster (pen pressure effect)
+      const vol = 0.02 + norm * 0.06;
+      penGain.gain.linearRampToValueAtTime(vol, t + 0.05);
+
+      // Filter frequency: higher pitch scratch when faster
+      const freq = 2500 + norm * 3000;  // 2500 → 5500 Hz
+      penFilter.frequency.linearRampToValueAtTime(freq, t + 0.05);
+
+      // Crackle: more prominent at medium speeds
+      const crackle = 0.008 + Math.sin(norm * Math.PI) * 0.025;
+      penCrackleGain.gain.linearRampToValueAtTime(crackle, t + 0.05);
+    }
+
+    /* ────────────────────────────────────────────
        DOM refs
     ──────────────────────────────────────────── */
-    const video     = document.getElementById("webcam");
-    const canvas    = document.getElementById("main-canvas");
-    const ctx       = canvas.getContext("2d");
-    const splash    = document.getElementById("splash");
-    const startBtn  = document.getElementById("start-btn");
-    const hud       = document.getElementById("hud");
+    const video       = document.getElementById("webcam");
+    const canvas      = document.getElementById("main-canvas");
+    const ctx         = canvas.getContext("2d");
+    const splash      = document.getElementById("splash");
+    const startBtn    = document.getElementById("start-btn");
+    const hud         = document.getElementById("hud");
+    const drawCanvas  = document.getElementById("draw-canvas");
+    const drawCtx     = drawCanvas.getContext("2d");
+    const drawHud     = document.getElementById("draw-hud");
+    const drawColorDot = document.getElementById("draw-color-dot");
+    const drawModeLabel = document.getElementById("draw-mode-label");
+    const settingsBtn  = document.getElementById("settings-btn");
+    const settingsPanel = document.getElementById("settings-panel");
+    const modeLaserBtn = document.getElementById("mode-laser");
+    const modeWriteBtn = document.getElementById("mode-write");
+    const clearBtn     = document.getElementById("clear-btn");
+    const colorSection = document.getElementById("color-section");
+    const clearSection = document.getElementById("clear-section");
+    const colorRow     = document.getElementById("color-row");
 
     /* ────────────────────────────────────────────
        Resize
     ──────────────────────────────────────────── */
     function resize() {
+      // Save draw canvas content before resize clears it
+      let savedImg = null;
+      if (drawCanvas.width > 0 && drawCanvas.height > 0) {
+        try { savedImg = drawCtx.getImageData(0, 0, drawCanvas.width, drawCanvas.height); } catch(e) {}
+      }
       canvas.width  = window.innerWidth;
       canvas.height = window.innerHeight;
+      drawCanvas.width  = window.innerWidth;
+      drawCanvas.height = window.innerHeight;
+      // Restore draw canvas content
+      if (savedImg) {
+        try { drawCtx.putImageData(savedImg, 0, 0); } catch(e) {}
+      }
     }
     window.addEventListener("resize", resize);
     resize();
@@ -417,6 +801,132 @@
       }
       // Other fingers: tip farther from wrist than PIP
       return lmDist(hand, tipId, 0) > lmDist(hand, pipId, 0);
+    }
+
+    /* ────────────────────────────────────────────
+       Drawing engine
+    ──────────────────────────────────────────── */
+
+    function drawStrokeSegment(x, y) {
+      const c = DRAW_COLORS[drawColorIdx];
+      drawCtx.save();
+      drawCtx.lineCap = 'round';
+      drawCtx.lineJoin = 'round';
+
+      if (lastDrawPos) {
+        // Outer glow
+        drawCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.3)`;
+        drawCtx.shadowColor = `rgba(${c.r},${c.g},${c.b},0.8)`;
+        drawCtx.shadowBlur = 20;
+        drawCtx.lineWidth = 8;
+        drawCtx.beginPath();
+        drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
+        drawCtx.lineTo(x, y);
+        drawCtx.stroke();
+
+        // Core stroke
+        drawCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.85)`;
+        drawCtx.shadowBlur = 10;
+        drawCtx.lineWidth = 3;
+        drawCtx.beginPath();
+        drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
+        drawCtx.lineTo(x, y);
+        drawCtx.stroke();
+
+        // Hot center
+        drawCtx.strokeStyle = `rgba(255,255,255,0.6)`;
+        drawCtx.shadowBlur = 4;
+        drawCtx.lineWidth = 1.2;
+        drawCtx.beginPath();
+        drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
+        drawCtx.lineTo(x, y);
+        drawCtx.stroke();
+      }
+
+      drawCtx.restore();
+      lastDrawPos = { x, y };
+    }
+
+    function clearDrawCanvas() {
+      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+    }
+
+    function updateDrawHud() {
+      const c = DRAW_COLORS[drawColorIdx];
+      drawColorDot.style.background = c.hex;
+      drawColorDot.style.boxShadow = `0 0 8px ${c.hex}`;
+
+      if (appMode === 'write') {
+        drawModeLabel.textContent = '✏️ WRITING';
+      } else {
+        drawModeLabel.textContent = '⚡ LASER';
+      }
+    }
+
+    /** Draw a pulsing cursor ring at the drawing fingertip */
+    function drawCursorIndicator(pos) {
+      const c = DRAW_COLORS[drawColorIdx];
+      const pulse = 0.6 + 0.4 * Math.sin(frameTime * 8);
+
+      ctx.save();
+      ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${0.6 * pulse})`;
+      ctx.shadowColor = `rgba(${c.r},${c.g},${c.b},0.5)`;
+      ctx.shadowBlur = 16;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 10 * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // Inner dot
+      ctx.fillStyle = `rgba(${c.r},${c.g},${c.b},${0.9 * pulse})`;
+      ctx.shadowBlur = 8;
+      ctx.beginPath();
+      ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    /** Process writing mode — simply track index fingertip when extended */
+    function processWritingMode(hand) {
+      if (!hand) {
+        if (isDrawing) {
+          isDrawing = false;
+          lastDrawPos = null;
+          stopPenSound();
+        }
+        return;
+      }
+
+      const indexExtended = isFingerExtended(hand, 1);
+      const indexTip = lm(hand, 8);
+
+      if (indexExtended) {
+        // Calculate speed for sound
+        let speed = 0;
+        if (lastDrawPos) {
+          const dx = indexTip.x - lastDrawPos.x;
+          const dy = indexTip.y - lastDrawPos.y;
+          speed = Math.sqrt(dx * dx + dy * dy);
+        }
+
+        isDrawing = true;
+        drawStrokeSegment(indexTip.x, indexTip.y);
+        drawCursorIndicator(indexTip);
+        startPenSound();
+        updatePenSound(speed);
+
+        // Trail particles
+        if (Math.random() < 0.25) {
+          spawnParticles(indexTip.x, indexTip.y, DRAW_COLORS[drawColorIdx], 1);
+        }
+      } else {
+        // Finger curled → pen up
+        if (isDrawing) {
+          isDrawing = false;
+          lastDrawPos = null;
+          stopPenSound();
+        }
+      }
     }
 
     /* ────────────────────────────────────────────
@@ -565,6 +1075,28 @@
       frameTime = timestamp * 0.001;
       const W = canvas.width, H = canvas.height;
 
+      // ── Process based on selected mode ──
+      if (appMode === 'write') {
+        const writeHand = rightHand || leftHand;
+        processWritingMode(writeHand);
+      } else {
+        // Stop any leftover drawing state
+        if (isDrawing) {
+          isDrawing = false;
+          lastDrawPos = null;
+          stopPenSound();
+        }
+      }
+      updateDrawHud();
+
+      // Show status HUD when hand detected
+      const anyHand = leftHand || rightHand;
+      if (anyHand && appMode === 'write') {
+        drawHud.classList.add('visible');
+      } else {
+        drawHud.classList.remove('visible');
+      }
+
       // ── Background: deep midnight blue gradient ──
       const bg = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, W * 0.7);
       bg.addColorStop(0, "#0e1628");
@@ -581,6 +1113,9 @@
         ctx.drawImage(video, 0, 0, W, H);
         ctx.restore();
       }
+
+      // ── Composite persistent draw canvas ──
+      ctx.drawImage(drawCanvas, 0, 0);
 
       // ── Draw hand skeletons (silhouettes) ──
       if (leftHand) {
@@ -601,8 +1136,8 @@
         }
       }
 
-      // ── Laser beams between fingertips (only for OPEN fingers) ──
-      if (leftHand && rightHand) {
+      // ── Laser beams between fingertips (only in laser mode, both hands needed) ──
+      if (appMode === 'laser' && leftHand && rightHand) {
         // Pre-compute which fingers are extended on each hand
         const leftOpen  = FINGERTIP_IDS.map((_, i) => isFingerExtended(leftHand, i));
         const rightOpen = FINGERTIP_IDS.map((_, i) => isFingerExtended(rightHand, i));
@@ -687,14 +1222,77 @@
 
         splash.classList.add("hidden");
         hud.style.display = "block";
+        settingsBtn.style.display = "block";
 
         initAudio();
         initMediaPipe();
+        initSettingsPanel();
         requestAnimationFrame(render);
       } catch (err) {
         alert("Camera access is required.\n\n" + err.message);
       }
     });
+
+    /* ────────────────────────────────────────────
+       Settings Panel Logic
+    ──────────────────────────────────────────── */
+    function initSettingsPanel() {
+      // Toggle panel
+      settingsBtn.addEventListener('click', () => {
+        const open = settingsPanel.classList.toggle('visible');
+        settingsBtn.classList.toggle('open', open);
+      });
+
+      // Mode buttons
+      modeLaserBtn.addEventListener('click', () => {
+        appMode = 'laser';
+        modeLaserBtn.classList.add('active');
+        modeWriteBtn.classList.remove('active');
+        colorSection.style.display = 'none';
+        clearSection.style.display = 'none';
+        // Stop any active writing
+        isDrawing = false;
+        lastDrawPos = null;
+        stopPenSound();
+      });
+
+      modeWriteBtn.addEventListener('click', () => {
+        appMode = 'write';
+        modeWriteBtn.classList.add('active');
+        modeLaserBtn.classList.remove('active');
+        colorSection.style.display = 'block';
+        clearSection.style.display = 'block';
+      });
+
+      // Build color picker dots
+      DRAW_COLORS.forEach((c, i) => {
+        const dot = document.createElement('div');
+        dot.className = 'color-pick' + (i === 0 ? ' active' : '');
+        dot.style.background = c.hex;
+        dot.style.color = c.hex;
+        dot.title = c.hex;
+        dot.addEventListener('click', () => {
+          drawColorIdx = i;
+          colorRow.querySelectorAll('.color-pick').forEach(d => d.classList.remove('active'));
+          dot.classList.add('active');
+        });
+        colorRow.appendChild(dot);
+      });
+
+      // Clear button
+      clearBtn.addEventListener('click', () => {
+        clearDrawCanvas();
+        spawnParticles(canvas.width / 2, canvas.height / 2, COLORS.white, 40);
+      });
+
+      // Close panel when clicking outside
+      document.addEventListener('click', (e) => {
+        if (!settingsPanel.contains(e.target) && e.target !== settingsBtn) {
+          settingsPanel.classList.remove('visible');
+          settingsBtn.classList.remove('open');
+        }
+      });
+    }
   })();
   </script>
 </body>
