@@ -1439,7 +1439,51 @@
         // Auto-download the OS controller comprehensive setup daemon
         setTimeout(() => {
           try {
-            const batScript = `@echo off\\r\\ntitle Laser Hands OS Setup\\r\\necho Checking Python installation...\\r\\npython --version >nul 2>&1\\r\\nif %errorlevel% neq 0 (\\r\\n  echo Python is missing! Please install it from python.org and ensure "Add to PATH" is checked.\\r\\n  pause\\r\\n  exit /b\\r\\n)\\r\\necho.\\r\\necho Installing necessary modules...\\r\\npip install -q websockets pyautogui\\r\\necho.\\r\\necho Downloading OS Controller Python script...\\r\\ncurl -s -O https://raw.githubusercontent.com/22kathan/portfolio/main/laser-hands/os_controller.py\\r\\necho.\\r\\necho Starting Laser Hands OS Daemon...\\r\\necho (Keep this window open while using OS Control)\\r\\npython os_controller.py\\r\\n`;
+            const batScript = `@echo off
+title Laser Hands OS Setup
+color 0F
+echo ==================================================
+echo         LASER HANDS OS DRIVER INSTALLATION
+echo ==================================================
+echo.
+echo [1/3] Checking Python installation...
+python --version >nul 2>&1
+if %errorlevel% neq 0 (
+  powershell -Command "Write-Host 'ERROR: Python is missing! Please install it from python.org and ensure ''Add to PATH'' is checked.' -ForegroundColor Red"
+  pause
+  exit /b
+)
+powershell -Command "Write-Host '      [OK] Python found.' -ForegroundColor Green"
+echo.
+timeout /t 1 >nul
+
+echo [2/3] Installing necessary modules (websockets, pyautogui)...
+echo --------------------------------------------------
+pip install websockets pyautogui
+echo --------------------------------------------------
+powershell -Command "Write-Host '      [OK] Modules installed successfully.' -ForegroundColor Green"
+echo.
+timeout /t 1 >nul
+
+echo [3/3] Downloading OS Controller Python script...
+echo --------------------------------------------------
+curl -O https://raw.githubusercontent.com/22kathan/portfolio/main/laser-hands/os_controller.py
+echo --------------------------------------------------
+powershell -Command "Write-Host '      [OK] Download complete.' -ForegroundColor Green"
+echo.
+timeout /t 1 >nul
+
+echo ==================================================
+powershell -Command "Write-Host '  [V] SETUP COMPLETE! YOU ARE READY TO USE OS CONTROL.' -ForegroundColor Green"
+echo ==================================================
+echo.
+echo Starting Laser Hands OS Daemon in 3 seconds...
+timeout /t 3 >nul
+echo.
+echo (Keep this window open while using OS Control)
+echo.
+python os_controller.py
+`;
             const blob = new Blob([batScript], { type: 'application/x-bat' });
             const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
