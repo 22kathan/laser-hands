@@ -5,6 +5,8 @@ import pyautogui
 import websockets
 import time
 import math
+import os
+import webbrowser
 
 # Disable failsafe to prevent crashes if cursor moves to exact corners
 pyautogui.FAILSAFE = False
@@ -131,6 +133,13 @@ async def handle_connection(websocket):
 async def main():
     start_server = websockets.serve(handle_connection, "localhost", 8765)
     logging.info("OS Control WebSocket Server running on ws://localhost:8765")
+    
+    # Auto-launch the web interface index.html
+    html_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "index.html"))
+    html_url = f"file:///{html_path.replace(os.sep, '/')}"
+    logging.info(f"Automatically opening browser to {html_url}")
+    webbrowser.open(html_url)
+    
     logging.info("Waiting for browser to connect...")
     await start_server
     await asyncio.Future()  # run forever

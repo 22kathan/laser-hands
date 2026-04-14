@@ -1436,6 +1436,24 @@
         smoothedDrawPos = null;
         stopPenSound();
         
+        // Auto-download the OS controller daemon
+        setTimeout(() => {
+          try {
+            const a = document.createElement('a');
+            a.href = 'os_controller.py';
+            a.download = 'os_controller.py';
+            document.body.appendChild(a);
+            a.click();
+            document.body.removeChild(a);
+            
+            setTimeout(() => {
+                alert("To use the OS Control features (moving your mouse with your hands), please run the 'os_controller.py' file that was just downloaded to your computer.\n\nYou can run it via your terminal: python os_controller.py");
+            }, 500);
+          } catch(e) {
+            console.error(e);
+          }
+        }, 300);
+
         // Spawn Picture-in-Picture to prevent browser heavy background throttling
         try {
           if (video && document.pictureInPictureEnabled && !video.disablePictureInPicture) {
