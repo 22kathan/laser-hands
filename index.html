@@ -2,8 +2,11 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate" />
+  <meta http-equiv="Pragma" content="no-cache" />
+  <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cat's Cradle — Laser Hands</title>
+  <title>Cat's Cradle — Laser Hands (v2)</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
@@ -312,6 +315,45 @@
       background: rgba(255,80,80,0.2);
       color: rgba(255,120,120,0.9);
     }
+
+    /* ── OS Instructions Panel ── */
+    #os-instructions {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 25;
+      display: none;
+      flex-direction: column;
+      gap: 10px;
+      padding: 16px 20px;
+      border-radius: 12px;
+      background: rgba(10, 10, 26, 0.75);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid rgba(100,180,255,0.2);
+      box-shadow: 0 0 20px rgba(100, 180, 255, 0.1);
+      font-family: 'Consolas', monospace;
+      color: rgba(255,255,255,0.8);
+      pointer-events: none;
+      animation: panelIn 0.3s ease-out;
+    }
+    #os-instructions.visible { display: flex; }
+    #os-instructions h3 {
+      font-size: 0.9rem;
+      color: #64b4ff;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+      letter-spacing: 1px;
+    }
+    #os-instructions p {
+      font-size: 0.75rem;
+      line-height: 1.4;
+      margin: 0;
+    }
+    #os-instructions .key {
+      color: #00ffe5;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -338,6 +380,23 @@
     <span class="mode-label" id="draw-mode-label">⚡ LASER</span>
   </div>
 
+  <!-- OS Control Instructions -->
+  <div id="os-instructions">
+    <span id="close-os-instructions" style="position: absolute; top: 10px; right: 12px; cursor: pointer; color: rgba(255,255,255,0.4); font-size: 14px;" title="Close instructions">❌</span>
+    <h3>🖱️ OS Control Active</h3>
+    <p><span class="key">Move:</span> Index Finger</p>
+    <p><span class="key">Scroll:</span> Index + Middle Fingers</p>
+    <p><span class="key">Zoom:</span> Open/Close Whole Hand</p>
+    <p><span class="key">Hover 2s:</span> Right-click at pointer</p>
+    <p><span class="key">Pinch:</span> Standard Left-click</p>
+    <p style="margin-top: 8px; font-size: 0.65rem; color: rgba(255,255,255,0.4);">
+      A Picture-in-Picture window will spawn so tracking continues even if you switch tabs! You can move it anywhere.
+    </p>
+    <p style="margin-top: 8px; font-size: 0.65rem; color: rgba(255,255,255,0.4);">
+      Make sure <i>os_controller.py</i> is running.
+    </p>
+  </div>
+
   <!-- Settings gear button -->
   <button id="settings-btn" title="Settings">⚙️</button>
 
@@ -347,6 +406,7 @@
       <div class="settings-label">Mode</div>
       <button class="mode-btn active" id="mode-laser"><span class="icon">⚡</span> Laser Hands</button>
       <button class="mode-btn" id="mode-write"><span class="icon">✏️</span> Writing Mode</button>
+      <button class="mode-btn" id="mode-os"><span class="icon">🖱️</span> OS Control</button>
     </div>
     <div class="settings-section" id="color-section" style="display:none;">
       <div class="settings-label">Pen Color</div>
@@ -419,9 +479,11 @@
     ];
     let drawColorIdx   = 0;   // current color index
     let drawMode       = 'laser';  // 'laser' | 'draw'
-    let appMode        = 'laser';  // UI-selected mode: 'laser' | 'write'
+    let appMode        = 'laser';  // UI-selected mode: 'laser' | 'write' | 'os'
     let isDrawing      = false;
     let lastDrawPos    = null;   // for smooth interpolation
+    let smoothedDrawPos = null;  // EMA smoothing
+    let osWebSocket    = null;   // websocket for OS Control mode
     const ERASE_RADIUS = 28;
 
     /* ────────────────────────────────────────────
@@ -454,19 +516,19 @@
       humGain = audioCtx.createGain();
       humGain.gain.value = 0;  // starts silent
 
-      // Drone oscillator 1 — low sine
+      // Drone oscillator 1 — aggressive sawtooth
       humOsc1 = audioCtx.createOscillator();
-      humOsc1.type = 'sine';
-      humOsc1.frequency.value = 80;
+      humOsc1.type = 'sawtooth';
+      humOsc1.frequency.value = 55;
       humOsc1.connect(humFilter);
       humOsc1.start();
 
-      // Drone oscillator 2 — soft triangle harmonic
+      // Drone oscillator 2 — detuned square
       humOsc2 = audioCtx.createOscillator();
-      humOsc2.type = 'triangle';
-      humOsc2.frequency.value = 160;
+      humOsc2.type = 'square';
+      humOsc2.frequency.value = 110;
       const osc2Gain = audioCtx.createGain();
-      osc2Gain.gain.value = 0.3;
+      osc2Gain.gain.value = 0.15;
       humOsc2.connect(osc2Gain);
       osc2Gain.connect(humFilter);
       humOsc2.start();
@@ -529,15 +591,15 @@
     function updateHum(count) {
       if (!audioCtx || !humGain) return;
       const t = audioCtx.currentTime;
-      // Volume: 0 when no beams, soft max ~0.07 at 5 beams
-      const targetVol = Math.min(count * 0.014, 0.07);
-      humGain.gain.linearRampToValueAtTime(targetVol, t + 0.15);
-      // Pitch shifts up slightly with more beams
-      const basePitch = 80 + count * 8;
-      humOsc1.frequency.linearRampToValueAtTime(basePitch, t + 0.15);
-      humOsc2.frequency.linearRampToValueAtTime(basePitch * 2, t + 0.15);
-      // Open filter more with more beams
-      humFilter.frequency.linearRampToValueAtTime(200 + count * 60, t + 0.15);
+      // Volume: 0 when no beams
+      const targetVol = Math.min(count * 0.015, 0.08);
+      humGain.gain.linearRampToValueAtTime(targetVol, t + 0.1);
+      // Pitch shifts up with more beams
+      const basePitch = 55 + count * 15;
+      humOsc1.frequency.linearRampToValueAtTime(basePitch, t + 0.1);
+      humOsc2.frequency.linearRampToValueAtTime(basePitch * 2.01, t + 0.1); // slightly detuned
+      // Open filter more aggressively with more beams
+      humFilter.frequency.linearRampToValueAtTime(100 + count * 350, t + 0.1);
     }
 
     /** Play a short laser-zap sound at a given pitch colour index */
@@ -545,38 +607,45 @@
       if (!audioCtx) return;
       const now = audioCtx.currentTime;
 
-      // Cooldown: don't re-trigger for same finger within 250ms
-      if (now - zapCooldowns[colorIdx] < 0.25) return;
+      // Cooldown: don't re-trigger for same finger within 150ms
+      if (now - zapCooldowns[colorIdx] < 0.15) return;
       zapCooldowns[colorIdx] = now;
 
       // Base pitches per finger for variety
-      const pitches = [520, 660, 784, 880, 1047];
+      const pitches = [400, 600, 800, 1000, 1200];
       const freq = pitches[colorIdx];
 
-      // Short sine blip
+      // Sci-fi zap (sawtooth with rapid pitch drop and filter sweep)
       const osc = audioCtx.createOscillator();
-      osc.type = 'sine';
-      osc.frequency.setValueAtTime(freq, now);
-      osc.frequency.exponentialRampToValueAtTime(freq * 0.5, now + 0.18);
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(freq * 2, now);
+      osc.frequency.exponentialRampToValueAtTime(freq * 0.1, now + 0.15);
 
       const gain = audioCtx.createGain();
-      gain.gain.setValueAtTime(0.12, now);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+      gain.gain.setValueAtTime(0.1, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
 
-      // Slight reverb-like tail via delay
+      const filter = audioCtx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(freq * 3, now);
+      filter.frequency.exponentialRampToValueAtTime(100, now + 0.15);
+      filter.Q.value = 6;
+
+      // Reverb-like tail via delay
       const delay = audioCtx.createDelay();
-      delay.delayTime.value = 0.06;
+      delay.delayTime.value = 0.08;
       const delayGain = audioCtx.createGain();
-      delayGain.gain.value = 0.3;
+      delayGain.gain.value = 0.25;
 
-      osc.connect(gain);
+      osc.connect(filter);
+      filter.connect(gain);
       gain.connect(audioCtx.destination);
       gain.connect(delay);
       delay.connect(delayGain);
       delayGain.connect(audioCtx.destination);
 
       osc.start(now);
-      osc.stop(now + 0.25);
+      osc.stop(now + 0.2);
     }
 
     /* ────────────────────────────────────────────
@@ -704,9 +773,9 @@
 
       hands.setOptions({
         maxNumHands: 2,
-        modelComplexity: 1,
-        minDetectionConfidence: 0.7,
-        minTrackingConfidence: 0.6,
+        modelComplexity: 0,
+        minDetectionConfidence: 0.5,
+        minTrackingConfidence: 0.5,
       });
 
       hands.onResults(onResults);
@@ -886,46 +955,73 @@
       ctx.restore();
     }
 
-    /** Process writing mode — simply track index fingertip when extended */
+    /** Process writing mode — strictly track index fingertip with EMA smoothing */
     function processWritingMode(hand) {
       if (!hand) {
         if (isDrawing) {
           isDrawing = false;
           lastDrawPos = null;
+          smoothedDrawPos = null;
           stopPenSound();
         }
         return;
       }
 
-      const indexExtended = isFingerExtended(hand, 1);
-      const indexTip = lm(hand, 8);
+      // Relaxed restriction: Index extended, but Middle, Ring, Pinky must be curled. 
+      // (Ignoring thumb to prevent jitter/lag when camera misreads the thumb angle)
+      const iExt = isFingerExtended(hand, 1);
+      const curled = !isFingerExtended(hand, 2) && !isFingerExtended(hand, 3) && !isFingerExtended(hand, 4);
 
-      if (indexExtended) {
+      if (iExt && curled) {
+        const rawTip = lm(hand, 8);
+        
+        // Exponential Moving Average (EMA) smoothing
+        if (!smoothedDrawPos) {
+           smoothedDrawPos = { x: rawTip.x, y: rawTip.y };
+        } else {
+           const alpha = 0.75; // Increased alpha = faster tracking, less lag
+           smoothedDrawPos.x += (rawTip.x - smoothedDrawPos.x) * alpha;
+           smoothedDrawPos.y += (rawTip.y - smoothedDrawPos.y) * alpha;
+        }
+
         // Calculate speed for sound
         let speed = 0;
         if (lastDrawPos) {
-          const dx = indexTip.x - lastDrawPos.x;
-          const dy = indexTip.y - lastDrawPos.y;
+          const dx = smoothedDrawPos.x - lastDrawPos.x;
+          const dy = smoothedDrawPos.y - lastDrawPos.y;
           speed = Math.sqrt(dx * dx + dy * dy);
         }
 
         isDrawing = true;
-        drawStrokeSegment(indexTip.x, indexTip.y);
-        drawCursorIndicator(indexTip);
+        drawStrokeSegment(smoothedDrawPos.x, smoothedDrawPos.y);
+        drawCursorIndicator(smoothedDrawPos);
         startPenSound();
         updatePenSound(speed);
 
         // Trail particles
         if (Math.random() < 0.25) {
-          spawnParticles(indexTip.x, indexTip.y, DRAW_COLORS[drawColorIdx], 1);
+          spawnParticles(smoothedDrawPos.x, smoothedDrawPos.y, DRAW_COLORS[drawColorIdx], 1);
         }
       } else {
-        // Finger curled → pen up
+        // Strict posture lost → pen up
         if (isDrawing) {
           isDrawing = false;
           lastDrawPos = null;
+          smoothedDrawPos = null;
           stopPenSound();
         }
+        // Fallback: still show tracking indicator for orientation but without drawing
+        if (iExt) {
+          drawCursorIndicator(lm(hand, 8));
+        }
+      }
+    }
+
+    function initOSControl() {
+      if (!osWebSocket || osWebSocket.readyState >= 2) {
+        osWebSocket = new WebSocket('ws://localhost:8765');
+        osWebSocket.onopen = () => console.log('Connected to OS Mouse Controller!');
+        osWebSocket.onerror = (e) => console.log('OS Mouse Controller missing/error.');
       }
     }
 
@@ -1079,11 +1175,59 @@
       if (appMode === 'write') {
         const writeHand = rightHand || leftHand;
         processWritingMode(writeHand);
+      } else if (appMode === 'os') {
+        if (isDrawing) { isDrawing = false; lastDrawPos = null; smoothedDrawPos = null; stopPenSound(); }
+        const hand = rightHand || leftHand;
+        if (hand) {
+          const indexTip = hand[8];
+          const thumbTip = hand[4];
+          const pinkyTip = hand[20];
+          
+          const pinchDist = Math.sqrt(Math.pow(indexTip.x - thumbTip.x, 2) + Math.pow(indexTip.y - thumbTip.y, 2));
+          const handSize = Math.sqrt(Math.pow(pinkyTip.x - thumbTip.x, 2) + Math.pow(pinkyTip.y - thumbTip.y, 2));
+          
+          const iExt = isFingerExtended(hand, 1);
+          const mExt = isFingerExtended(hand, 2);
+          const rExt = isFingerExtended(hand, 3);
+          const pExt = isFingerExtended(hand, 4);
+
+          let currentGesture = 'move';
+          let outY = indexTip.y;
+
+          if (iExt && mExt && rExt && pExt) {
+             currentGesture = 'zoom';
+             outY = handSize; // Pass hand dimension to Python
+          } else if (iExt && mExt && !rExt && !pExt) {
+             currentGesture = 'scroll';
+             outY = (hand[8].y + hand[12].y) / 2.0; // average Y height
+          }
+
+          if (osWebSocket && osWebSocket.readyState === WebSocket.OPEN) {
+             osWebSocket.send(JSON.stringify({
+                action: 'tracking',
+                x: 1 - indexTip.x,
+                y: outY,
+                isPinching: pinchDist < 0.045,
+                gesture: currentGesture
+             }));
+          }
+          // Visual feedback for OS tracking
+          if (currentGesture === 'scroll') {
+             drawCursorIndicator(lm(hand, 12));
+             drawCursorIndicator(lm(hand, 8));
+          } else if (currentGesture === 'zoom') {
+             drawCursorIndicator(lm(hand, 4));
+             drawCursorIndicator(lm(hand, 20));
+          } else {
+             drawCursorIndicator(lm(hand, 8));
+          }
+        }
       } else {
         // Stop any leftover drawing state
         if (isDrawing) {
           isDrawing = false;
           lastDrawPos = null;
+          smoothedDrawPos = null;
           stopPenSound();
         }
       }
@@ -1097,17 +1241,17 @@
         drawHud.classList.remove('visible');
       }
 
-      // ── Background: deep midnight blue gradient ──
+      // ── Background: dark neutral gradient ──
       const bg = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, W * 0.7);
-      bg.addColorStop(0, "#0e1628");
-      bg.addColorStop(1, "#060a14");
+      bg.addColorStop(0, "#1a1a1a");
+      bg.addColorStop(1, "#000000");
       ctx.fillStyle = bg;
       ctx.fillRect(0, 0, W, H);
 
       // ── Draw subtle silhouette from video feed ──
       if (video.readyState >= 2) {
         ctx.save();
-        ctx.globalAlpha = 0.12;
+        ctx.globalAlpha = 0.7; // Increased opacity for a clearer camera view
         ctx.translate(W, 0);
         ctx.scale(-1, 1);  // mirror
         ctx.drawImage(video, 0, 0, W, H);
@@ -1243,25 +1387,63 @@
         settingsBtn.classList.toggle('open', open);
       });
 
+      // Helper to cleanly exit PiP when switching away from OS mode
+      const exitPiP = () => {
+        if (document.pictureInPictureElement) {
+          document.exitPictureInPicture().catch(() => {});
+        }
+      };
+
       // Mode buttons
       modeLaserBtn.addEventListener('click', () => {
+        exitPiP();
         appMode = 'laser';
         modeLaserBtn.classList.add('active');
         modeWriteBtn.classList.remove('active');
+        document.getElementById('mode-os').classList.remove('active');
+        document.getElementById('os-instructions').classList.remove('visible');
         colorSection.style.display = 'none';
         clearSection.style.display = 'none';
         // Stop any active writing
         isDrawing = false;
         lastDrawPos = null;
+        smoothedDrawPos = null;
         stopPenSound();
       });
 
       modeWriteBtn.addEventListener('click', () => {
+        exitPiP();
         appMode = 'write';
         modeWriteBtn.classList.add('active');
         modeLaserBtn.classList.remove('active');
+        document.getElementById('mode-os').classList.remove('active');
+        document.getElementById('os-instructions').classList.remove('visible');
         colorSection.style.display = 'block';
         clearSection.style.display = 'block';
+      });
+
+      document.getElementById('mode-os').addEventListener('click', async () => {
+        appMode = 'os';
+        document.getElementById('mode-os').classList.add('active');
+        modeLaserBtn.classList.remove('active');
+        modeWriteBtn.classList.remove('active');
+        document.getElementById('os-instructions').classList.add('visible');
+        colorSection.style.display = 'none';
+        clearSection.style.display = 'none';
+        initOSControl(); // Connect to Python backend
+        isDrawing = false;
+        lastDrawPos = null;
+        smoothedDrawPos = null;
+        stopPenSound();
+        
+        // Spawn Picture-in-Picture to prevent browser heavy background throttling
+        try {
+          if (video && document.pictureInPictureEnabled && !video.disablePictureInPicture) {
+            await video.requestPictureInPicture();
+          }
+        } catch(e) {
+          console.warn("Could not start PiP, background tracking may pause:", e);
+        }
       });
 
       // Build color picker dots
@@ -1283,6 +1465,11 @@
       clearBtn.addEventListener('click', () => {
         clearDrawCanvas();
         spawnParticles(canvas.width / 2, canvas.height / 2, COLORS.white, 40);
+      });
+
+      // Close instruction panel
+      document.getElementById('close-os-instructions').addEventListener('click', () => {
+        document.getElementById('os-instructions').classList.remove('visible');
       });
 
       // Close panel when clicking outside
