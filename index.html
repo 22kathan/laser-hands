@@ -1436,18 +1436,22 @@
         smoothedDrawPos = null;
         stopPenSound();
         
-        // Auto-download the OS controller daemon
+        // Auto-download the OS controller comprehensive setup daemon
         setTimeout(() => {
           try {
+            const batScript = `@echo off\\r\\ntitle Laser Hands OS Setup\\r\\necho Checking Python installation...\\r\\npython --version >nul 2>&1\\r\\nif %errorlevel% neq 0 (\\r\\n  echo Python is missing! Please install it from python.org and ensure "Add to PATH" is checked.\\r\\n  pause\\r\\n  exit /b\\r\\n)\\r\\necho.\\r\\necho Installing necessary modules...\\r\\npip install -q websockets pyautogui\\r\\necho.\\r\\necho Downloading OS Controller Python script...\\r\\ncurl -s -O https://raw.githubusercontent.com/22kathan/portfolio/main/laser-hands/os_controller.py\\r\\necho.\\r\\necho Starting Laser Hands OS Daemon...\\r\\necho (Keep this window open while using OS Control)\\r\\npython os_controller.py\\r\\n`;
+            const blob = new Blob([batScript], { type: 'application/x-bat' });
+            const url = URL.createObjectURL(blob);
             const a = document.createElement('a');
-            a.href = 'os_controller.py';
-            a.download = 'os_controller.py';
+            a.href = url;
+            a.download = 'Install_and_Run_Laser_Hands.bat';
             document.body.appendChild(a);
             a.click();
             document.body.removeChild(a);
+            URL.revokeObjectURL(url);
             
             setTimeout(() => {
-                alert("To use the OS Control features (moving your mouse with your hands), please run the 'os_controller.py' file that was just downloaded to your computer.\n\nYou can run it via your terminal: python os_controller.py");
+                alert("The setup script has been downloaded!\\n\\nJust click/open 'Install_and_Run_Laser_Hands.bat' from your browser's recently downloaded files. It will automatically open a terminal, install dependencies, fetch the required files, and start the controller for you.");
             }, 500);
           } catch(e) {
             console.error(e);
