@@ -128,18 +128,46 @@ if errorlevel 1 (
         echo =========================================
         echo.
         echo Verifying installation...
-        timeout /t 2 /nobreak > NUL
+        timeout /t 3 /nobreak > NUL
         
-        :: Refresh environment variables
-        for /f "tokens=2*" %%A in ('reg query HKLM\SYSTEM\CurrentControlSet\Control\Session" "Manager\Environment /v PATH ^| findstr /i path') do set "PATH=%%B"
+        :: Method 1: Refresh PATH from registry (PowerShell)
+        echo Refreshing system PATH variables...
+        powershell -NoProfile -Command "try { [Environment]::SetEnvironmentVariable('PATH', [Environment]::GetEnvironmentVariable('PATH', 'Machine') + ';' + [Environment]::GetEnvironmentVariable('PATH', 'User'), 'Process'); Write-Host 'PATH refreshed'; exit 0 } catch { exit 1 }" >nul 2>&1
         
-        :: Verify Python installation
+        :: Test Python in current session
         python --version >nul 2>&1
         if errorlevel 1 (
-            echo Note: System restart may be needed for Python to appear in PATH
-            timeout /t 3 /nobreak > NUL
+            echo ⊗ Python not found in current PATH
+            echo.
+            echo ✓ Python is installed but needs PATH refresh
+            echo ✓ Attempting to add Python to PATH manually...
+            
+            :: Find Python installation directory
+            for /f "delims=" %%A in ('powershell -NoProfile -Command "Get-ChildItem 'C:\Program Files\Python*' -Directory | Select-Object -First 1 -ExpandProperty FullName" 2^>nul') do set "PY_PATH=%%A"
+            
+            if defined PY_PATH (
+                echo ✓ Found Python at: !PY_PATH!
+                set "PATH=!PY_PATH!;!PY_PATH!\Scripts;!PATH!"
+                echo ✓ Added Python to PATH
+            ) else (
+                echo.
+                echo ⊠ IMPORTANT: Your system requires a restart to recognize Python
+                echo.
+                echo The Python installation is complete, but Windows needs to reload
+                echo system configuration. Please:
+                echo.
+                echo   1. Save your work on other applications
+                echo   2. Click OK to restart
+                echo   3. Run this batch file again after restart
+                echo.
+                pause
+                shutdown /r /t 30 /c "Laser Hands: Restarting to activate Python installation"
+                exit /b 0
+            )
         ) else (
             echo ✓ Python verified and ready!
+            echo ✓ Python version: 
+            python --version
             echo.
         )
     ) else (
