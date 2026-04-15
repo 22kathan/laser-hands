@@ -78,8 +78,13 @@ if errorlevel 1 (
     
     echo.
     if !install_result! equ 0 (
-        echo Python installation complete!
-        timeout /t 3 /nobreak > NUL
+        echo =========================================
+        echo.
+        echo     [PASS] Python Downloaded! [OK]
+        echo.
+        echo =========================================
+        echo.
+        timeout /t 2 /nobreak > NUL
         
         :: Refresh environment variables
         for /f "tokens=2*" %%A in ('reg query HKLM\SYSTEM\CurrentControlSet\Control\Session" "Manager\Environment /v PATH ^| findstr /i path') do set "PATH=%%B"
@@ -91,8 +96,15 @@ if errorlevel 1 (
             timeout /t 3 /nobreak > NUL
         ) else (
             echo [OK] Python verified and ready!
+            echo.
         )
     ) else (
+        echo =========================================
+        echo.
+        echo  [FAIL] Installation failed! [ERROR]
+        echo.
+        echo =========================================
+        echo.
         echo Installation failed with error code !install_result!
         echo Please install Python manually from: https://www.python.org/downloads/
         pause
@@ -105,7 +117,12 @@ if errorlevel 1 (
     :: Return to original directory
     cd /d "%~dp0"
 ) else (
-    echo [OK] Python is already installed
+    echo =========================================
+    echo.
+    echo   [PASS] Python Already Installed [OK]
+    echo.
+    echo =========================================
+    echo.
 )
 
 echo.
