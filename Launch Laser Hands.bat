@@ -43,20 +43,47 @@ if errorlevel 1 (
     cd /d "!download_dir!"
     
     :: Download Python installer using multiple methods for reliability
-    echo Attempting download method 1: PowerShell...
-    powershell -Command "try { $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python-installer.exe' -UseBasicParsing; exit 0 } catch { exit 1 }" >nul 2>&1
+    echo [1/3] Attempting download method 1: PowerShell Invoke-WebRequest...
+    powershell -NoProfile -Command "try { $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python-installer.exe' -UseBasicParsing -TimeoutSec 120; if (Test-Path 'python-installer.exe') { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
     
-    if not errorlevel 1 goto python_install
+    if not errorlevel 1 (
+        echo ✓ Method 1 succeeded!
+        goto python_install
+    )
     
-    echo PowerShell download failed. Attempting method 2: curl...
-    curl -L -o python-installer.exe "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe" >nul 2>&1
+    echo ⊗ Method 1 failed. [2/3] Attempting download method 2: curl...
+    curl -L --max-time 120 -o python-installer.exe "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe" >nul 2>&1
     
-    if not errorlevel 1 goto python_install
+    if exist "python-installer.exe" (
+        echo ✓ Method 2 succeeded!
+        goto python_install
+    )
     
-    echo curl download failed. Please install Python manually.
+    echo ⊗ Method 2 failed. [3/3] Attempting download method 3: BitsTransfer (Windows only)...
+    powershell -NoProfile -Command "try { Start-BitsTransfer -Source 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -Destination 'python-installer.exe' -Timeout 120; if (Test-Path 'python-installer.exe') { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+    
+    if exist "python-installer.exe" (
+        echo ✓ Method 3 succeeded!
+        goto python_install
+    )
+    
+    echo.
+    echo =========================================
+    echo     [FAIL] Python Download Failed [ERROR]
+    echo =========================================
+    echo.
+    echo All automated download methods failed.
+    echo Possible causes:
+    echo   - No internet connection
+    echo   - Firewall blocking python.org
+    echo   - Network proxy issues
+    echo.
+    echo Solution: Install Python manually
     echo.
     echo Visit: https://www.python.org/downloads/release/python-3119/
     echo Download: python-3.11.9-amd64.exe
+    echo Install with: python-3.11.9-amd64.exe /quiet InstallAllUsers=1 PrependPath=1
+    echo.
     pause
     exit /b 1
     
@@ -68,9 +95,25 @@ if errorlevel 1 (
         exit /b 1
     )
     
-    echo Download successful! Installing Python...
-    echo This will take a few moments. Please wait...
     echo.
+    echo =========================================
+    echo      Installing Python 3.11...
+    echo =========================================
+    echo.
+    echo This will take a few moments. Please wait...
+    echo Checking file integrity...
+    
+    :: Verify file size is reasonable (should be > 20MB)
+    for %%A in (python-installer.exe) do set "file_size=%%~zA"
+    if %file_size% LSS 20000000 (
+        echo ⊗ Downloaded file appears corrupted (too small: %file_size% bytes)
+        echo Please try manual installation: https://www.python.org/downloads/
+        pause
+        exit /b 1
+    )
+    echo ✓ File integrity check passed
+    echo.
+    echo Running installer...
     
     :: Run installer silently with all features enabled and add to PATH
     python-installer.exe /quiet InstallAllUsers=1 PrependPath=1
@@ -84,6 +127,7 @@ if errorlevel 1 (
         echo.
         echo =========================================
         echo.
+        echo Verifying installation...
         timeout /t 2 /nobreak > NUL
         
         :: Refresh environment variables
@@ -92,10 +136,10 @@ if errorlevel 1 (
         :: Verify Python installation
         python --version >nul 2>&1
         if errorlevel 1 (
-            echo Verifying installation... (restart may be needed)
+            echo Note: System restart may be needed for Python to appear in PATH
             timeout /t 3 /nobreak > NUL
         ) else (
-            echo [OK] Python verified and ready!
+            echo ✓ Python verified and ready!
             echo.
         )
     ) else (
@@ -105,8 +149,16 @@ if errorlevel 1 (
         echo.
         echo =========================================
         echo.
-        echo Installation failed with error code !install_result!
-        echo Please install Python manually from: https://www.python.org/downloads/
+        echo Installation failed with error code: !install_result!
+        echo.
+        echo Common solutions:
+        echo   1. Run as Administrator (right-click batch file ^& select "Run as administrator")
+        echo   2. Check disk space (need ~150MB free)
+        echo   3. Try manual installation: https://www.python.org/downloads/
+        echo.
+        echo For detailed help, visit:
+        echo   https://github.com/22kathan/laser-hands
+        echo.
         pause
         exit /b 1
     )
