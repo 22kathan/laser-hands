@@ -127,6 +127,9 @@ if errorlevel 1 (
 
 echo.
 echo [1/2] Starting OS Controller backend (Python)...
+echo Installing required dependencies...
+python -m pip install -q -r requirements.txt >nul 2>&1
+
 :: Run the python script in a new console window so it stays open
 start "OS Controller" cmd /c "python os_controller.py"
 

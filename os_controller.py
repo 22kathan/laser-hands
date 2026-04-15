@@ -131,18 +131,29 @@ async def handle_connection(websocket):
             is_mouse_down = False
 
 async def main():
-    start_server = websockets.serve(handle_connection, "localhost", 8765)
-    logging.info("OS Control WebSocket Server running on ws://localhost:8765")
-    
-    # Auto-launch the web interface index.html
-    html_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "index.html"))
-    html_url = f"file:///{html_path.replace(os.sep, '/')}"
-    logging.info(f"Automatically opening browser to {html_url}")
-    webbrowser.open(html_url)
-    
-    logging.info("Waiting for browser to connect...")
-    await start_server
-    await asyncio.Future()  # run forever
+    try:
+        async with websockets.serve(handle_connection, "localhost", 8765):
+            logging.info("OS Control WebSocket Server running on ws://localhost:8765")
+            
+            # Auto-launch the web interface index.html
+            html_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "index.html"))
+            html_url = f"file:///{html_path.replace(os.sep, '/')}"
+            logging.info(f"Automatically opening browser to {html_url}")
+            webbrowser.open(html_url)
+            
+            logging.info("Waiting for browser to connect...")
+            await asyncio.Future()  # run forever
+    except Exception as e:
+        logging.error(f"Server error: {e}")
+        raise
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except ImportError as e:
+        logging.error(f"Missing dependency: {e}")
+        logging.error("Please install required packages: pip install -r requirements.txt")
+        exit(1)
+    except Exception as e:
+        logging.error(f"Fatal error: {e}")
+        exit(1)
