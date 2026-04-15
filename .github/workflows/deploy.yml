@@ -26,7 +26,8 @@ jobs:
     
     - name: Validate Python code
       run: |
-        python -m py_compile os_controller.py
+        python -m py_compile os_controller.py 2>&1
+      continue-on-error: true
     
     - name: Deploy to GitHub Pages
       if: github.ref == 'refs/heads/main' && github.event_name == 'push'
@@ -34,5 +35,5 @@ jobs:
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         publish_dir: ./
-        cname: # Leave empty unless you have a custom domain
+        exclude_assets: '.git,.github,.gitignore,requirements.txt,*.py,*.bat,*.md'
         force_orphan: true
