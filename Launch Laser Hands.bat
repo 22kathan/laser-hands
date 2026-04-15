@@ -6,6 +6,18 @@ echo       Starting Laser Hands Project
 echo =========================================
 echo.
 
+:: Check if running from auto-startup after crash/restart
+set "startup_mode=0"
+for /f "tokens=*" %%A in ('powershell -NoProfile -Command "try { Get-ItemProperty 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LaserHandsStartup' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LaserHandsStartup } catch {}" 2^>nul') do (
+    if "%%A" neq "" (
+        set "startup_mode=1"
+    )
+)
+
+if !startup_mode! equ 1 (
+    echo [INFO] Resuming after system restart...
+)
+
 :: Check if Python is installed
 python --version >nul 2>&1
 if errorlevel 1 (
@@ -151,17 +163,16 @@ if errorlevel 1 (
                 echo ✓ Added Python to PATH
             ) else (
                 echo.
-                echo ⊠ IMPORTANT: Your system requires a restart to recognize Python
+                echo [AUTO] System restart required to activate Python PATH
+                echo [AUTO] Scheduling automatic restart...
                 echo.
-                echo The Python installation is complete, but Windows needs to reload
-                echo system configuration. Please:
-                echo.
-                echo   1. Save your work on other applications
-                echo   2. Click OK to restart
-                echo   3. Run this batch file again after restart
-                echo.
-                pause
-                shutdown /r /t 30 /c "Laser Hands: Restarting to activate Python installation"
+                
+                :: Create a scheduled task to run this batch file on next startup
+                set "script_path=%~f0"
+                powershell -NoProfile -Command "try { New-Item -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LaserHandsStartup' -Value '\"!script_path!\"' -Force | Out-Null; Write-Host 'Auto-start registered'; exit 0 } catch { exit 1 }" >nul 2>&1
+                
+                :: Immediate shutdown (0 seconds) with auto-restart
+                shutdown /r /t 0 /c "Laser Hands: Auto-restart to activate Python" /d p:0:0
                 exit /b 0
             )
         ) else (
@@ -223,4 +234,8 @@ start "" "index.html"
 echo.
 echo Launch sequence complete. You can close this window.
 timeout /t 3 > NUL
+
+:: Clean up startup registry entry if it exists
+powershell -NoProfile -Command "try { Remove-ItemProperty -Path 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run' -Name 'LaserHandsStartup' -ErrorAction SilentlyContinue | Out-Null; Write-Host '[OK] Startup entry cleaned up' } catch {}" >nul 2>&1
+
 exit
