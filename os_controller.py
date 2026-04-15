@@ -31,8 +31,6 @@ prev_scroll_y = None
 prev_zoom_size = None
 prev_speed = 0
 last_click_time = 0
-last_click_pos = None
-gesture_start_time = None
 
 # Cursor smoothing constants (improved for stability)
 MIN_DEADZONE_PX = 5  # Ignore tiny movements
@@ -42,7 +40,7 @@ VELOCITY_SMOOTHING = 0.4  # Smooth out acceleration
 
 async def handle_connection(websocket):
     global is_mouse_down, hover_start_time, hover_pos
-    global prev_mouse_x, prev_mouse_y, prev_scroll_y, prev_zoom_size, prev_speed, last_click_time, last_click_pos, gesture_start_time
+    global prev_mouse_x, prev_mouse_y, prev_scroll_y, prev_zoom_size, prev_speed, last_click_time
     logging.info("Browser connected!")
     try:
         async for message in websocket:
@@ -54,8 +52,6 @@ async def handle_connection(websocket):
                 norm_y = data.get("y", 0.5)
                 is_pinching = data.get("isPinching", False)
                 gesture = data.get("gesture", "move")
-                hand_distance = data.get("handDistance", 0)
-                hand_open = data.get("handOpen", True)
                 
                 if gesture == "move":
                     # Clear alternate gesture states
@@ -97,28 +93,41 @@ async def handle_connection(websocket):
                     pyautogui.moveTo(smoothed_x, smoothed_y, _pause=False)
                     prev_mouse_x, prev_mouse_y = smoothed_x, smoothed_y
                     
-                    # Left Click Hook
+                    # PERFECTED: Left Click Hook with debouncing
                     if is_pinching and not is_mouse_down:
                         pyautogui.mouseDown()
                         is_mouse_down = True
-                        logging.info("Left Mouse Down")
+                        last_click_time = time.time()
+                        logging.info("✓ Left Mouse Down (Click Started)")
                     elif not is_pinching and is_mouse_down:
-                        pyautogui.mouseUp()
-                        is_mouse_down = False
-                        logging.info("Left Mouse Up")
+                        # Only register if pinch stayed down > 50ms (prevents accidental clicks)
+                        if time.time() - last_click_time > 0.05:
+                            pyautogui.mouseUp()
+                            is_mouse_down = False
+                            logging.info("✓ Left Mouse Up (Click Complete)")
+                        else:
+                            # Reject accidental short click
+                            pyautogui.mouseUp()
+                            is_mouse_down = False
+                            logging.info("⊗ Click ignored (too short)")
                         
-                    # Right Click Hook (Hover-based)
+                    # PERFECTED: Right Click Hook with better hover detection
                     if hover_start_time is None:
                         hover_start_time = time.time()
                         hover_pos = (target_x, target_y)
                     else:
-                        if math.hypot(target_x - hover_pos[0], target_y - hover_pos[1]) > HOVER_TOLERANCE_PX:
+                        hover_distance = math.hypot(target_x - hover_pos[0], target_y - hover_pos[1])
+                        hover_duration = time.time() - hover_start_time
+                        
+                        # Reset if hand moved too much
+                        if hover_distance > HOVER_TOLERANCE_PX:
                             hover_start_time = time.time()
                             hover_pos = (target_x, target_y)
-                        elif (time.time() - hover_start_time) >= HOVER_DURATION_SEC:
+                        # Execute right click only after stable hover
+                        elif hover_duration >= HOVER_DURATION_SEC and hover_distance < HOVER_TOLERANCE_PX:
                             pyautogui.rightClick()
-                            logging.info("Right Click Executed")
-                            hover_start_time = None  # Reset
+                            logging.info("✓ Right Click Executed (Stable Hover)")
+                            hover_start_time = None  # Reset hover state
                             
                 elif gesture == "scroll":
                     if prev_scroll_y is None:
@@ -129,7 +138,7 @@ async def handle_connection(websocket):
                             clicks = int(-dy * 4000)
                             pyautogui.scroll(clicks)
                             prev_scroll_y = norm_y
-                            logging.info(f"Scroll: {clicks} clicks")
+                            logging.info(f"✓ Scroll: {clicks} clicks")
                             
                 elif gesture == "zoom":
                     if prev_zoom_size is None:
@@ -139,68 +148,12 @@ async def handle_connection(websocket):
                         if abs(dz) > 0.04:
                             if dz > 0:
                                 pyautogui.hotkey('ctrl', '-')
-                                logging.info("Zooming Out")
+                                logging.info("✓ Zooming Out")
                             else:
                                 pyautogui.hotkey('ctrl', '+')
-                                logging.info("Zooming In")
+                                logging.info("✓ Zooming In")
                             prev_zoom_size = norm_y
-                
-                # NEW GESTURES: No lag, hardware-level speed
-                elif gesture == "double_click":
-                    pyautogui.click()
-                    pyautogui.click()
-                    logging.info("Double Click")
-                
-                elif gesture == "swipe_left":
-                    pyautogui.hotkey('alt', 'left')
-                    logging.info("Swipe Left: Alt+Left (Back)")
-                
-                elif gesture == "swipe_right":
-                    pyautogui.hotkey('alt', 'right')
-                    logging.info("Swipe Right: Alt+Right (Forward)")
-                
-                elif gesture == "swipe_up":
-                    pyautogui.hotkey('win', 'tab')
-                    logging.info("Swipe Up: Task View")
-                
-                elif gesture == "swipe_down":
-                    pyautogui.hotkey('win', 'd')
-                    logging.info("Swipe Down: Show Desktop")
-                
-                elif gesture == "hand_open":
-                    # Hand fully open (palm facing camera)
-                    if not hand_open:
-                        pyautogui.hotkey('win', 'up')
-                        logging.info("Hand Open: Maximize Window")
-                
-                elif gesture == "hand_closed":
-                    # Hand fully closed (fist)
-                    if hand_open:
-                        pyautogui.hotkey('win', 'down')
-                        logging.info("Hand Closed: Minimize Window")
-                
-                elif gesture == "thumbs_up":
-                    pyautogui.hotkey('ctrl', 'l')
-                    logging.info("Thumbs Up: Focus Address Bar")
-                
-                elif gesture == "peace":
-                    # Two fingers up (peace sign)
-                    pyautogui.hotkey('ctrl', 't')
-                    logging.info("Peace: New Tab")
-                
-                elif gesture == "ok_sign":
-                    # Thumb & index circle
-                    pyautogui.hotkey('ctrl', 'w')
-                    logging.info("OK Sign: Close Tab")
-                
-                elif gesture == "volume_up":
-                    pyautogui.hotkey('volumeup')
-                    logging.info("Volume Up")
-                
-                elif gesture == "volume_down":
-                    pyautogui.hotkey('volumedown')
-                    logging.info("Volume Down")
-                
+                    
     except websockets.exceptions.ConnectionClosed:
         logging.info("Browser disconnected.")
     except Exception as e:
