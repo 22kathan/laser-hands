@@ -19,7 +19,7 @@ Download `Setup-and-Launch-Laser-Hands.bat` from:
 ### **Step 3: Follow On-Screen Instructions**
 The batch file will automatically:
 ✅ Check if Python 3.11 is installed  
-✅ Download Python from python.org (if needed)  
+✅ Download Python from python.org (with active timer and progress bar)  
 ✅ Install Python silently  
 ✅ Download Laser Hands project files  
 ✅ Install Python dependencies  

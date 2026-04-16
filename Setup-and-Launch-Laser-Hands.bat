@@ -68,30 +68,40 @@ if errorlevel 1 (
     if not exist "!download_dir!" mkdir "!download_dir!"
     cd /d "!download_dir!"
     
-    :: Download Python installer using multiple methods for reliability
-    echo [1/3] Attempting download method 1: PowerShell...
-    powershell -NoProfile -Command "try { $ProgressPreference = 'SilentlyContinue'; Invoke-WebRequest -Uri 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -OutFile 'python-installer.exe' -UseBasicParsing -TimeoutSec 120; if (Test-Path 'python-installer.exe') { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
+    :: Download Python installer with Timer and Progress Bar
+    echo [PROGRESS] Initializing download...
+    powershell -NoProfile -Command ^
+        "$url = 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe';" ^
+        "$out = 'python-installer.exe';" ^
+        "$start = Get-Date;" ^
+        "Write-Host 'Download started at: ' -NoNewline; Write-Host ($start.ToString('HH:mm:ss')) -ForegroundColor Cyan;" ^
+        "try {" ^
+        "    $job = Start-BitsTransfer -Source $url -Destination $out -Asynchronous -ErrorAction Stop;" ^
+        "    while ($job.State -eq 'Transferring' -or $job.State -eq 'Connecting' -or $job.State -eq 'Queued') {" ^
+        "        $elapsed = (Get-Date) - $start;" ^
+        "        $timeStr = '{0:D2}m {1:D2}s' -f [int][Math]::Floor($elapsed.TotalMinutes), $elapsed.Seconds;" ^
+        "        $percent = if ($job.BytesTotal -gt 0) { ($job.BytesTransferred / $job.BytesTotal) * 100 } else { 0 };" ^
+        "        $status = \"Elapsed: $timeStr | $([Math]::Round($job.BytesTransferred / 1MB, 1))MB / $([Math]::Round($job.BytesTotal / 1MB, 1))MB\";" ^
+        "        Write-Progress -Activity 'Downloading Python 3.11 (Total: 5-15 mins)' -Status $status -PercentComplete $percent;" ^
+        "        Start-Sleep -Seconds 1;" ^
+        "    }" ^
+        "    Complete-BitsTransfer -BitsJob $job;" ^
+        "    $end = Get-Date; $total = $end - $start;" ^
+        "    Write-Host '✓ Download Success!' -ForegroundColor Green;" ^
+        "    Write-Host \"Total Time: $([int]$total.TotalMinutes)m $($total.Seconds)s\";" ^
+        "} catch {" ^
+        "    Write-Host '⚠ BITS method failed, trying fallback...' -ForegroundColor Yellow;" ^
+        "    Invoke-WebRequest -Uri $url -OutFile $out;" ^
+        "}"
     
-    if not errorlevel 1 (
-        echo ✓ Method 1 succeeded!
-        goto python_install
+    if not exist "python-installer.exe" (
+        echo ⊗ All automated download methods failed.
+        goto download_error
     )
-    
-    echo ⊗ Method 1 failed. [2/3] Attempting download method 2: curl...
-    curl -L --max-time 120 -o python-installer.exe "https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe" >nul 2>&1
-    
-    if exist "python-installer.exe" (
-        echo ✓ Method 2 succeeded!
-        goto python_install
-    )
-    
-    echo ⊗ Method 2 failed. [3/3] Attempting download method 3: BitsTransfer...
-    powershell -NoProfile -Command "try { Start-BitsTransfer -Source 'https://www.python.org/ftp/python/3.11.9/python-3.11.9-amd64.exe' -Destination 'python-installer.exe' -Timeout 120; if (Test-Path 'python-installer.exe') { exit 0 } else { exit 1 } } catch { exit 1 }" >nul 2>&1
-    
-    if exist "python-installer.exe" (
-        echo ✓ Method 3 succeeded!
-        goto python_install
-    )
+    echo ✓ Method succeeded!
+    goto python_install
+
+:download_error
     
     echo.
     echo =========================================
