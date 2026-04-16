@@ -391,6 +391,10 @@
     <p><span class="key">✦ Scroll:</span> Rotate hand (twist motion)</p>
     <p><span class="key">✦ Zoom In:</span> Close hand (pinch all fingers)</p>
     <p><span class="key">✦ Zoom Out:</span> Open hand wide (spread fingers)</p>
+    <hr style="border: 0; border-top: 1px solid rgba(255,255,255,0.1); margin: 8px 0;">
+    <h3>✏️ Writing Mode Tips</h3>
+    <p><span class="key">✦ Write:</span> Index finger out</p>
+    <p><span class="key">✦ Move Story:</span> Pinch (Thumb + Index)</p>
     <p style="margin-top: 8px; font-size: 0.65rem; color: rgba(255,255,255,0.4);">
       <b>💡 Tips:</b> Keep hand steady for accurate control. Use slow, deliberate movements for precision.
     </p>
@@ -487,6 +491,13 @@
     let smoothedDrawPos = null;  // EMA smoothing
     let osWebSocket    = null;   // websocket for OS Control mode
     const ERASE_RADIUS = 28;
+    
+    /* ── Writing storage & Panning ── */
+    let strokes        = [];       // Array of { points: [{x,y}], colorIdx: 0 }
+    let currentStroke  = null;     // Current stroke being drawn
+    let canvasOffset   = { x: 0, y: 0 };
+    let isMovingCanvas = false;
+    let lastPinchPos   = null;
 
     /* ────────────────────────────────────────────
        Audio system (Web Audio API — procedural)
@@ -878,38 +889,33 @@
        Drawing engine
     ──────────────────────────────────────────── */
 
-    function drawStrokeSegment(x, y) {
+    function drawStrokeSegment(x, y, isRedraw = false) {
       const c = DRAW_COLORS[drawColorIdx];
       drawCtx.save();
       drawCtx.lineCap = 'round';
       drawCtx.lineJoin = 'round';
 
-      if (lastDrawPos) {
+      // If we are redrawing, 'lastDrawPos' is handled externally per stroke
+      const startX = isRedraw ? lastDrawPos.x : (lastDrawPos ? lastDrawPos.x : x);
+      const startY = isRedraw ? lastDrawPos.y : (lastDrawPos ? lastDrawPos.y : y);
+
+      if (isRedraw || lastDrawPos) {
         // Outer glow
         drawCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.3)`;
         drawCtx.shadowColor = `rgba(${c.r},${c.g},${c.b},0.8)`;
         drawCtx.shadowBlur = 20;
-        drawCtx.lineWidth = 8;
+        drawCtx.lineWidth = 10; // Extra bold for Writing Mode
         drawCtx.beginPath();
-        drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
+        drawCtx.moveTo(startX, startY);
         drawCtx.lineTo(x, y);
         drawCtx.stroke();
 
         // Core stroke
-        drawCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.85)`;
+        drawCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.9)`;
         drawCtx.shadowBlur = 10;
-        drawCtx.lineWidth = 3;
+        drawCtx.lineWidth = 4;
         drawCtx.beginPath();
-        drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
-        drawCtx.lineTo(x, y);
-        drawCtx.stroke();
-
-        // Hot center
-        drawCtx.strokeStyle = `rgba(255,255,255,0.6)`;
-        drawCtx.shadowBlur = 4;
-        drawCtx.lineWidth = 1.2;
-        drawCtx.beginPath();
-        drawCtx.moveTo(lastDrawPos.x, lastDrawPos.y);
+        drawCtx.moveTo(startX, startY);
         drawCtx.lineTo(x, y);
         drawCtx.stroke();
       }
@@ -918,8 +924,26 @@
       lastDrawPos = { x, y };
     }
 
+    function redrawStrokes() {
+      drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      const oldIdx = drawColorIdx;
+      
+      for (const s of strokes) {
+        drawColorIdx = s.colorIdx;
+        lastDrawPos = null;
+        for (const p of s.points) {
+          drawStrokeSegment(p.x + canvasOffset.x, p.y + canvasOffset.y, true);
+        }
+      }
+      
+      drawColorIdx = oldIdx;
+      lastDrawPos = null;
+    }
+
     function clearDrawCanvas() {
       drawCtx.clearRect(0, 0, drawCanvas.width, drawCanvas.height);
+      strokes = [];
+      currentStroke = null;
     }
 
     function updateDrawHud() {
@@ -957,64 +981,101 @@
       ctx.restore();
     }
 
-    /** Process writing mode — strictly track index fingertip with EMA smoothing */
+    /** Process writing mode — support panning and stroke storage */
     function processWritingMode(hand) {
       if (!hand) {
         if (isDrawing) {
           isDrawing = false;
           lastDrawPos = null;
           smoothedDrawPos = null;
-          // // stopPenSound(); // Muted
- // Muted
+          if (currentStroke) {
+            strokes.push(currentStroke);
+            currentStroke = null;
+          }
         }
+        isMovingCanvas = false;
+        lastPinchPos = null;
         return;
       }
 
-      // Relaxed restriction: Index extended, but Middle, Ring, Pinky must be curled. 
-      // (Ignoring thumb to prevent jitter/lag when camera misreads the thumb angle)
+      const thumbTip = lm(hand, 4);
+      const indexTip = lm(hand, 8);
+      const pinchDist = dist2D(thumbTip, indexTip);
+      const isPinching = pinchDist < 35; // px distance threshold
+
       const iExt = isFingerExtended(hand, 1);
       const curled = !isFingerExtended(hand, 2) && !isFingerExtended(hand, 3) && !isFingerExtended(hand, 4);
 
+      // --- PINCH TO MOVE ---
+      if (isPinching && curled) {
+        if (isDrawing) { // finish current stroke if we were drawing
+          isDrawing = false;
+          if (currentStroke) strokes.push(currentStroke);
+          currentStroke = null;
+          lastDrawPos = null;
+        }
+
+        const currentPinch = { x: (thumbTip.x + indexTip.x)/2, y: (thumbTip.y + indexTip.y)/2 };
+        
+        if (!isMovingCanvas) {
+          isMovingCanvas = true;
+          lastPinchPos = currentPinch;
+        } else {
+          const dx = currentPinch.x - lastPinchPos.x;
+          const dy = currentPinch.y - lastPinchPos.y;
+          canvasOffset.x += dx;
+          canvasOffset.y += dy;
+          lastPinchPos = currentPinch;
+          redrawStrokes(); // Refresh canvas position
+        }
+        
+        // Visual indicator for moving
+        drawCursorIndicator(currentPinch);
+        return; 
+      } else {
+        isMovingCanvas = false;
+        lastPinchPos = null;
+      }
+
+      // --- INDEX FINGER TO DRAW ---
       if (iExt && curled) {
         const rawTip = lm(hand, 8);
         
-        // Exponential Moving Average (EMA) smoothing
         if (!smoothedDrawPos) {
            smoothedDrawPos = { x: rawTip.x, y: rawTip.y };
         } else {
-           const alpha = 0.75; // Increased alpha = faster tracking, less lag
+           const alpha = 0.75;
            smoothedDrawPos.x += (rawTip.x - smoothedDrawPos.x) * alpha;
            smoothedDrawPos.y += (rawTip.y - smoothedDrawPos.y) * alpha;
         }
 
-        // Calculate speed for sound
-        let speed = 0;
-        if (lastDrawPos) {
-          const dx = smoothedDrawPos.x - lastDrawPos.x;
-          const dy = smoothedDrawPos.y - lastDrawPos.y;
-          speed = Math.sqrt(dx * dx + dy * dy);
+        if (!isDrawing) {
+          isDrawing = true;
+          currentStroke = { colorIdx: drawColorIdx, points: [] };
         }
 
-        isDrawing = true;
+        // Store point relative to offset
+        currentStroke.points.push({ 
+          x: smoothedDrawPos.x - canvasOffset.x, 
+          y: smoothedDrawPos.y - canvasOffset.y 
+        });
+
         drawStrokeSegment(smoothedDrawPos.x, smoothedDrawPos.y);
         drawCursorIndicator(smoothedDrawPos);
-        // startPenSound(); // Muted
-        // updatePenSound(speed); // Muted
 
-        // Trail particles
         if (Math.random() < 0.25) {
           spawnParticles(smoothedDrawPos.x, smoothedDrawPos.y, DRAW_COLORS[drawColorIdx], 1);
         }
       } else {
-        // Strict posture lost → pen up
         if (isDrawing) {
           isDrawing = false;
           lastDrawPos = null;
           smoothedDrawPos = null;
-          // stopPenSound(); // Muted
-
+          if (currentStroke) {
+            strokes.push(currentStroke);
+            currentStroke = null;
+          }
         }
-        // Fallback: still show tracking indicator for orientation but without drawing
         if (iExt) {
           drawCursorIndicator(lm(hand, 8));
         }
@@ -1116,12 +1177,18 @@
     }
 
     // Draw skeleton chain (finger bones) with soft glow
-    function drawSkeleton(hand, color) {
+    function drawSkeleton(hand, color, thin = false) {
       ctx.save();
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},0.25)`;
-      ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.4)`;
-      ctx.shadowBlur = 8;
-      ctx.lineWidth = 2.5;
+      if (thin) {
+        ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},0.3)`;
+        ctx.lineWidth = 0.5;
+        ctx.shadowBlur = 0;
+      } else {
+        ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},0.25)`;
+        ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.4)`;
+        ctx.shadowBlur = 8;
+        ctx.lineWidth = 2.5;
+      }
       for (const chain of FINGER_CHAINS) {
         ctx.beginPath();
         for (let j = 0; j < chain.length; j++) {
@@ -1268,42 +1335,64 @@
         drawHud.classList.remove('visible');
       }
 
-      // ── Background: dark neutral gradient ──
-      const bg = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, W * 0.7);
-      bg.addColorStop(0, "#1a1a1a");
-      bg.addColorStop(1, "#000000");
-      ctx.fillStyle = bg;
-      ctx.fillRect(0, 0, W, H);
+      // ── Background & Camera Feed ──
+      if (appMode === 'write') {
+        ctx.fillStyle = "#000000";
+        ctx.fillRect(0, 0, W, H);
+      } else {
+        const bg = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, W * 0.7);
+        bg.addColorStop(0, "#1a1a1a");
+        bg.addColorStop(1, "#000000");
+        ctx.fillStyle = bg;
+        ctx.fillRect(0, 0, W, H);
 
-      // ── Draw subtle silhouette from video feed ──
-      if (video.readyState >= 2) {
-        ctx.save();
-        ctx.globalAlpha = 0.7; // Increased opacity for a clearer camera view
-        ctx.translate(W, 0);
-        ctx.scale(-1, 1);  // mirror
-        ctx.drawImage(video, 0, 0, W, H);
-        ctx.restore();
+        if (video.readyState >= 2) {
+          ctx.save();
+          ctx.globalAlpha = 0.7;
+          ctx.translate(W, 0);
+          ctx.scale(-1, 1);
+          ctx.drawImage(video, 0, 0, W, H);
+          ctx.restore();
+        }
       }
 
-      // ── Composite persistent draw canvas ──
+      // ── Render stored strokes (relative to pan offset) ──
+      // Note: We redraw everything every frame for consistency during move
+      if (appMode === 'write' && (isMovingCanvas || strokes.length > 0)) {
+         redrawStrokes();
+      }
+
+      // ── Composite draw canvas ──
       ctx.drawImage(drawCanvas, 0, 0);
 
-      // ── Draw hand skeletons (silhouettes) ──
+      // ── Draw hand skeletons (thin lighting in Writing Mode) ──
+      const isThin = (appMode === 'write');
+
       if (leftHand) {
-        drawSkeleton(leftHand, COLORS.cyan);
+        drawSkeleton(leftHand, COLORS.cyan, isThin);
         for (const id of JOINT_IDS) {
           const p = lm(leftHand, id);
-          const isTip = FINGERTIP_IDS.includes(id);
-          drawJointDot(p, COLORS.cyan, isTip ? 6 : 3);
+          if (isThin) {
+            ctx.fillStyle = "rgba(0, 255, 229, 0.2)";
+            ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI*2); ctx.fill();
+          } else {
+            const isTip = FINGERTIP_IDS.includes(id);
+            drawJointDot(p, COLORS.cyan, isTip ? 6 : 3);
+          }
         }
       }
 
       if (rightHand) {
-        drawSkeleton(rightHand, COLORS.magenta);
+        drawSkeleton(rightHand, COLORS.magenta, isThin);
         for (const id of JOINT_IDS) {
           const p = lm(rightHand, id);
-          const isTip = FINGERTIP_IDS.includes(id);
-          drawJointDot(p, COLORS.magenta, isTip ? 6 : 3);
+          if (isThin) {
+            ctx.fillStyle = "rgba(255, 0, 255, 0.2)";
+            ctx.beginPath(); ctx.arc(p.x, p.y, 2, 0, Math.PI*2); ctx.fill();
+          } else {
+            const isTip = FINGERTIP_IDS.includes(id);
+            drawJointDot(p, COLORS.magenta, isTip ? 6 : 3);
+          }
         }
       }
 
