@@ -167,16 +167,32 @@ async def handle_connection(websocket):
 async def main():
     try:
         async with websockets.serve(handle_connection, "localhost", 8765):
-            logging.info("OS Control WebSocket Server running on ws://localhost:8765")
+            print("\n" + "="*50)
+            print("   LASER HANDS OS DAEMON IS ACTIVE")
+            print("="*50)
+            print("✓ WebSocket Server: ws://localhost:8765")
             
-            # Auto-launch the web interface index.html
+            # Smart HTML Auto-Launch
             html_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "index.html"))
-            html_url = f"file:///{html_path.replace(os.sep, '/')}"
-            logging.info(f"Automatically opening browser to {html_url}")
-            webbrowser.open(html_url)
+            if os.path.exists(html_path):
+                html_url = f"file:///{html_path.replace(os.sep, '/')}"
+                logging.info(f"Opening local web interface: {html_url}")
+                webbrowser.open(html_url)
+            else:
+                print("\n[INFO] index.html not found in current directory.")
+                print("       This is okay! Keep your browser tab open at:")
+                print("       http://localhost:8000  OR  your github portfolio site.")
             
-            logging.info("Waiting for browser to connect...")
+            print("\n[READY] Waiting for browser to connect...")
+            print("(Minimize this window and use gestures in the browser)\n")
+            
             await asyncio.Future()  # run forever
+    except OSError as e:
+        if e.errno == 98 or e.errno == 10048:
+            print("\n[ERROR] Port 8765 is already in use!")
+            print("        Make sure another instance of this script isn't already running.\n")
+        else:
+            logging.error(f"Server error: {e}")
     except Exception as e:
         logging.error(f"Server error: {e}")
         raise

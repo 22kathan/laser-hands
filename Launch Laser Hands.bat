@@ -224,12 +224,16 @@ python -m pip install -q -r requirements.txt >nul 2>&1
 :: Run the python script in a new console window so it stays open
 start "OS Controller" cmd /c "python os_controller.py"
 
-echo [2/2] Opening the Web Interface...
-:: Wait a brief moment to ensure the websocket server is up
+echo [2/3] Starting Local Web Server (UI)...
+:: Start Python's built-in HTTP server on port 8000 in the background
+start /b "Laser Hands UI Server" python -m http.server 8000
+
+echo [3/3] Opening the Experience...
+:: Wait a brief moment to ensure both servers (WebSocket and HTTP) are initialized
 timeout /t 2 /nobreak > NUL
 
-:: Open the index.html in the default web browser
-start "" "index.html"
+:: Open the localhost URL instead of the local file path
+start "" "http://localhost:8000"
 
 echo.
 echo Launch sequence complete. You can close this window.
