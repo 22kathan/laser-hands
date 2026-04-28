@@ -21,21 +21,49 @@ logging.info(f"Detected screen resolution: {SCREEN_WIDTH}x{SCREEN_HEIGHT}")
 is_mouse_down = False
 
 # Cursor smoothing state
-prev_mouse_x = None
-prev_mouse_y = None
 prev_scroll_y = None
-prev_speed = 0
 last_click_time = 0
 
-# Enterprise-grade cursor constants
-MIN_DEADZONE_PX = 3       # Tight deadzone for precision
-SMOOTHING_ALPHA = 0.55     # Base smoothing (0.4-0.7 sweet spot)
-MAX_VELOCITY = 120         # Cap max cursor jump
-VELOCITY_SMOOTHING = 0.35  # Smooth acceleration transitions
+# ── One Euro Filter: gold-standard adaptive smoothing ──
+# Low speed = heavy filtering (kills jitter), high speed = instant response
+class OneEuroFilter:
+    def __init__(self, freq=120.0, min_cutoff=1.0, beta=0.005, d_cutoff=1.0):
+        self.freq = freq
+        self.min_cutoff = min_cutoff
+        self.beta = beta
+        self.d_cutoff = d_cutoff
+        self.x_prev = None
+        self.dx_prev = 0.0
+        self.last_time = None
+
+    def _alpha(self, cutoff):
+        te = 1.0 / self.freq
+        tau = 1.0 / (2 * math.pi * cutoff)
+        return 1.0 / (1.0 + tau / te)
+
+    def filter(self, x, t=None):
+        if t is not None and self.last_time is not None and t != self.last_time:
+            self.freq = 1.0 / (t - self.last_time)
+        self.last_time = t
+        if self.x_prev is None:
+            self.x_prev = x
+            self.dx_prev = 0.0
+            return x
+        dx = (x - self.x_prev) * self.freq
+        a_d = self._alpha(self.d_cutoff)
+        self.dx_prev = a_d * dx + (1 - a_d) * self.dx_prev
+        cutoff = self.min_cutoff + self.beta * abs(self.dx_prev)
+        a_x = self._alpha(cutoff)
+        self.x_prev = a_x * x + (1 - a_x) * self.x_prev
+        return self.x_prev
+
+# Cursor filters — tuned for butter-smooth OS control
+cursor_filter_x = OneEuroFilter(freq=120, min_cutoff=0.8, beta=0.004, d_cutoff=1.0)
+cursor_filter_y = OneEuroFilter(freq=120, min_cutoff=0.8, beta=0.004, d_cutoff=1.0)
 
 async def handle_connection(websocket):
     global is_mouse_down
-    global prev_mouse_x, prev_mouse_y, prev_scroll_y, prev_speed, last_click_time
+    global prev_scroll_y, last_click_time
     logging.info("Browser connected!")
     try:
         async for message in websocket:
@@ -62,32 +90,12 @@ async def handle_connection(websocket):
                     target_x = scaled_x * SCREEN_WIDTH
                     target_y = scaled_y * SCREEN_HEIGHT
                     
-                    # Initialize on first frame
-                    if prev_mouse_x is None:
-                        prev_mouse_x, prev_mouse_y = target_x, target_y
-                        prev_speed = 0
+                    # One Euro Filter — adaptive smoothing (replaces manual EMA + deadzone)
+                    now = time.monotonic()
+                    smoothed_x = cursor_filter_x.filter(target_x, now)
+                    smoothed_y = cursor_filter_y.filter(target_y, now)
                     
-                    # Raw movement distance
-                    raw_distance = math.hypot(target_x - prev_mouse_x, target_y - prev_mouse_y)
-                    
-                    # Deadzone: eliminate micro-jitter
-                    if raw_distance < MIN_DEADZONE_PX:
-                        # Still process clicks even in deadzone
-                        pass
-                    else:
-                        # Velocity-adaptive smoothing
-                        current_speed = min(raw_distance, MAX_VELOCITY)
-                        prev_speed = prev_speed * VELOCITY_SMOOTHING + current_speed * (1 - VELOCITY_SMOOTHING)
-                        
-                        # Fast motion = responsive, slow motion = ultra-stable
-                        adaptive_alpha = SMOOTHING_ALPHA * (1.0 + (prev_speed / 40.0) * 0.25)
-                        adaptive_alpha = max(0.3, min(adaptive_alpha, 0.85))
-                        
-                        smoothed_x = prev_mouse_x + (target_x - prev_mouse_x) * adaptive_alpha
-                        smoothed_y = prev_mouse_y + (target_y - prev_mouse_y) * adaptive_alpha
-                        
-                        pyautogui.moveTo(smoothed_x, smoothed_y, _pause=False)
-                        prev_mouse_x, prev_mouse_y = smoothed_x, smoothed_y
+                    pyautogui.moveTo(smoothed_x, smoothed_y, _pause=False)
                     
                     # LEFT CLICK: Index + Thumb pinch
                     if is_pinching and not is_mouse_down:

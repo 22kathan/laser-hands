@@ -491,6 +491,76 @@
     const PALETTE = [COLORS.cyan, COLORS.magenta, COLORS.yellow, COLORS.cyan, COLORS.magenta];
 
     const TOUCH_DIST_THRESHOLD = 0.04;  // normalised distance for "touch"
+
+    /* ────────────────────────────────────────────
+       One Euro Filter — Gold-standard adaptive smoothing
+       Low speed = heavy filtering (kills jitter)
+       High speed = light filtering (stays responsive)
+    ──────────────────────────────────────────── */
+    class OneEuroFilter {
+      constructor(freq = 90, minCutoff = 1.0, beta = 0.007, dCutoff = 1.0) {
+        this.freq = freq;
+        this.minCutoff = minCutoff;
+        this.beta = beta;
+        this.dCutoff = dCutoff;
+        this.xPrev = null;
+        this.dxPrev = 0;
+        this.lastTime = null;
+      }
+      _alpha(cutoff) {
+        const te = 1.0 / this.freq;
+        const tau = 1.0 / (2 * Math.PI * cutoff);
+        return 1.0 / (1.0 + tau / te);
+      }
+      filter(x, timestamp) {
+        if (this.lastTime !== null && timestamp !== this.lastTime) {
+          this.freq = 1.0 / ((timestamp - this.lastTime) / 1000);
+        }
+        this.lastTime = timestamp;
+        if (this.xPrev === null) {
+          this.xPrev = x;
+          this.dxPrev = 0;
+          return x;
+        }
+        const dx = (x - this.xPrev) * this.freq;
+        const adx = this._alpha(this.dCutoff);
+        this.dxPrev = adx * dx + (1 - adx) * this.dxPrev;
+        const cutoff = this.minCutoff + this.beta * Math.abs(this.dxPrev);
+        const ax = this._alpha(cutoff);
+        this.xPrev = ax * x + (1 - ax) * this.xPrev;
+        return this.xPrev;
+      }
+      reset() { this.xPrev = null; this.dxPrev = 0; this.lastTime = null; }
+    }
+
+    // Per-hand landmark smoothing buffers (21 landmarks × 3 axes each)
+    // Uses One Euro Filters for silky-smooth, zero-lag tracking
+    const HAND_FILTER_CONFIG = { freq: 90, minCutoff: 1.5, beta: 0.01, dCutoff: 1.0 };
+    let leftHandFilters = null;
+    let rightHandFilters = null;
+    let smoothedLeftHand = null;
+    let smoothedRightHand = null;
+
+    function createHandFilters() {
+      const filters = [];
+      for (let i = 0; i < 21; i++) {
+        filters.push({
+          x: new OneEuroFilter(HAND_FILTER_CONFIG.freq, HAND_FILTER_CONFIG.minCutoff, HAND_FILTER_CONFIG.beta, HAND_FILTER_CONFIG.dCutoff),
+          y: new OneEuroFilter(HAND_FILTER_CONFIG.freq, HAND_FILTER_CONFIG.minCutoff, HAND_FILTER_CONFIG.beta, HAND_FILTER_CONFIG.dCutoff),
+          z: new OneEuroFilter(HAND_FILTER_CONFIG.freq, HAND_FILTER_CONFIG.minCutoff, HAND_FILTER_CONFIG.beta, HAND_FILTER_CONFIG.dCutoff),
+        });
+      }
+      return filters;
+    }
+
+    function smoothHandLandmarks(raw, filters, timestamp) {
+      if (!filters) return raw;
+      return raw.map((lm, i) => ({
+        x: filters[i].x.filter(lm.x, timestamp),
+        y: filters[i].y.filter(lm.y, timestamp),
+        z: filters[i].z.filter(lm.z, timestamp),
+      }));
+    }
     const MAX_PARTICLES = 300;
 
     /* ────────────────────────────────────────────
@@ -536,18 +606,29 @@
     const EMA_ALPHA      = 0.45;
 
     // --- OS CONTROL STATE (normalized 0-1 coords) ---
-    let osSmoothedIndex  = null;  // EMA-smoothed index finger
-    let osSmoothedThumb  = null;  // EMA-smoothed thumb
-    let osSmoothedMiddle = null;  // EMA-smoothed middle finger
-    let osOutX = null;            // Final output X (second-pass smoothed)
-    let osOutY = null;            // Final output Y
+    // One Euro Filters for OS cursor (tighter params for mouse precision)
+    let osFilterX = new OneEuroFilter(90, 0.8, 0.004, 1.0);
+    let osFilterY = new OneEuroFilter(90, 0.8, 0.004, 1.0);
+    let osOutFilterX = new OneEuroFilter(90, 0.5, 0.003, 1.0);  // Second pass
+    let osOutFilterY = new OneEuroFilter(90, 0.5, 0.003, 1.0);
+    let osSmoothedIndex  = null;
+    let osSmoothedThumb  = null;
+    let osSmoothedMiddle = null;
+    let osOutX = null;
+    let osOutY = null;
     let osVelocity = 0;
     let lastMiddlePinchTime = 0;
     let middlePinchCount = 0;
     let wasMiddlePinching = false;
     let middlePinchReleaseTime = 0;
     let isScrolling = false;
-    let scrollBaseY = null; // Slightly lower for more stability
+    let scrollBaseY = null;
+
+    // Writing mode One Euro Filters
+    let writeIndexFilterX = new OneEuroFilter(90, 1.2, 0.008, 1.0);
+    let writeIndexFilterY = new OneEuroFilter(90, 1.2, 0.008, 1.0);
+    let writeThumbFilterX = new OneEuroFilter(90, 1.2, 0.008, 1.0);
+    let writeThumbFilterY = new OneEuroFilter(90, 1.2, 0.008, 1.0);
 
     function smoothPoint(prev, curr, alpha) {
         if (!prev) return { x: curr.x, y: curr.y };
@@ -862,9 +943,9 @@
 
       hands.setOptions({
         maxNumHands: 2,
-        modelComplexity: 1, // Increased from 0 for better accuracy (90fps target)
-        minDetectionConfidence: 0.8, // Raised for much higher lock-on stability
-        minTrackingConfidence: 0.8,  // Raised to prevent snap-jitters
+        modelComplexity: 1,
+        minDetectionConfidence: 0.85,
+        minTrackingConfidence: 0.85,
       });
 
       hands.onResults(onResults);
@@ -883,16 +964,35 @@
        MediaPipe results callback
     ──────────────────────────────────────────── */
     function onResults(results) {
-      leftHand  = null;
-      rightHand = null;
+      const now = performance.now();
+      let rawLeft = null, rawRight = null;
 
       if (results.multiHandLandmarks && results.multiHandedness) {
         for (let i = 0; i < results.multiHandLandmarks.length; i++) {
           const label = results.multiHandedness[i].label;
-          // Mirror: MediaPipe "Left" is viewer's right in mirrored feed
-          if (label === "Left")  rightHand = results.multiHandLandmarks[i];
-          if (label === "Right") leftHand  = results.multiHandLandmarks[i];
+          if (label === "Left")  rawRight = results.multiHandLandmarks[i];
+          if (label === "Right") rawLeft  = results.multiHandLandmarks[i];
         }
+      }
+
+      // Apply One Euro Filter smoothing to all landmarks
+      if (rawLeft) {
+        if (!leftHandFilters) leftHandFilters = createHandFilters();
+        smoothedLeftHand = smoothHandLandmarks(rawLeft, leftHandFilters, now);
+        leftHand = smoothedLeftHand;
+      } else {
+        leftHand = null;
+        // Reset filters after hand disappears so re-entry is instant
+        if (leftHandFilters) { leftHandFilters = null; smoothedLeftHand = null; }
+      }
+
+      if (rawRight) {
+        if (!rightHandFilters) rightHandFilters = createHandFilters();
+        smoothedRightHand = smoothHandLandmarks(rawRight, rightHandFilters, now);
+        rightHand = smoothedRightHand;
+      } else {
+        rightHand = null;
+        if (rightHandFilters) { rightHandFilters = null; smoothedRightHand = null; }
       }
     }
 
@@ -1163,15 +1263,19 @@
         return;
       }
 
-      // Pre-smooth the critical landmarks for this frame
+      // One Euro filtered landmarks for writing mode
       const rawThumb = lm(hand, 4);
       const rawIndex = lm(hand, 8);
+      const now = performance.now();
       
-      smoothedThumbPos = smoothPoint(smoothedThumbPos, rawThumb, EMA_ALPHA);
-      smoothedIndexPos = smoothPoint(smoothedIndexPos, rawIndex, EMA_ALPHA);
-
-      const thumbTip = smoothedThumbPos;
-      const indexTip = smoothedIndexPos;
+      const thumbTip = {
+        x: writeThumbFilterX.filter(rawThumb.x, now),
+        y: writeThumbFilterY.filter(rawThumb.y, now)
+      };
+      const indexTip = {
+        x: writeIndexFilterX.filter(rawIndex.x, now),
+        y: writeIndexFilterY.filter(rawIndex.y, now)
+      };
       
       // Use Normalized Distance for resolution-independent accuracy
       const pinchDistNorm = normDist(hand, 4, hand, 8);
@@ -1468,31 +1572,20 @@
         if (isDrawing) { isDrawing = false; lastDrawPos = null; smoothedDrawPos = null; }
           const hand = rightHand || leftHand;
           if (hand) {
-            // ── Raw normalized landmarks (0-1 range) ──
+            const now = performance.now();
+
+            // ── Raw normalized landmarks (already One Euro filtered from onResults) ──
             const rawIndex  = hand[8];
             const rawThumb  = hand[4];
             const rawMiddle = hand[12];
 
-            // ── Inline EMA smoothing for normalized coords ──
-            // (Can't use smoothPoint — it has pixel-space thresholds)
-            const OS_ALPHA = 0.45;
-            if (!osSmoothedIndex) osSmoothedIndex = { x: rawIndex.x, y: rawIndex.y };
-            else {
-              osSmoothedIndex.x += (rawIndex.x - osSmoothedIndex.x) * OS_ALPHA;
-              osSmoothedIndex.y += (rawIndex.y - osSmoothedIndex.y) * OS_ALPHA;
-            }
-            if (!osSmoothedThumb) osSmoothedThumb = { x: rawThumb.x, y: rawThumb.y };
-            else {
-              osSmoothedThumb.x += (rawThumb.x - osSmoothedThumb.x) * OS_ALPHA;
-              osSmoothedThumb.y += (rawThumb.y - osSmoothedThumb.y) * OS_ALPHA;
-            }
-            if (!osSmoothedMiddle) osSmoothedMiddle = { x: rawMiddle.x, y: rawMiddle.y };
-            else {
-              osSmoothedMiddle.x += (rawMiddle.x - osSmoothedMiddle.x) * OS_ALPHA;
-              osSmoothedMiddle.y += (rawMiddle.y - osSmoothedMiddle.y) * OS_ALPHA;
-            }
+            // ── OS-specific One Euro Filter pass (tighter params for mouse precision) ──
+            const smoothIdx = {
+              x: osFilterX.filter(rawIndex.x, now),
+              y: osFilterY.filter(rawIndex.y, now)
+            };
 
-            // ── Pinch detection (raw coords for responsiveness) ──
+            // ── Pinch detection (use pre-smoothed landmarks for stability) ──
             const indexPinchDist  = Math.sqrt(Math.pow(rawIndex.x - rawThumb.x, 2) + Math.pow(rawIndex.y - rawThumb.y, 2));
             const middlePinchDist = Math.sqrt(Math.pow(rawMiddle.x - rawThumb.x, 2) + Math.pow(rawMiddle.y - rawThumb.y, 2));
 
@@ -1510,7 +1603,6 @@
                 wasMiddlePinching = true;
                 scrollBaseY = rawMiddle.y;
               }
-              // Held > 150ms → scroll mode
               if (performance.now() - lastMiddlePinchTime > 150) {
                 currentGesture = 'scroll';
                 isScrolling = true;
@@ -1523,24 +1615,11 @@
               }
             }
 
-            // ── Cursor output: mirror X, apply velocity-adaptive smoothing ──
-            const cursorX = 1 - osSmoothedIndex.x;
-            const cursorY = osSmoothedIndex.y;
-
-            // Second-pass output smoothing (deadzone for jitter)
-            if (osOutX === null) { osOutX = cursorX; osOutY = cursorY; }
-            const dx = cursorX - osOutX;
-            const dy = cursorY - osOutY;
-            const moveDist = Math.sqrt(dx * dx + dy * dy);
-
-            if (moveDist > 0.0008) {
-              // Velocity-adaptive: fast = responsive, slow = stable
-              const speed = Math.min(moveDist * 100, 10);
-              osVelocity = osVelocity * 0.5 + speed * 0.5;
-              const outAlpha = Math.max(0.25, Math.min(0.8, 0.3 + osVelocity * 0.06));
-              osOutX += dx * outAlpha;
-              osOutY += dy * outAlpha;
-            }
+            // ── Cursor output: mirror X, second-pass One Euro for final output ──
+            const cursorX = 1 - smoothIdx.x;
+            const cursorY = smoothIdx.y;
+            osOutX = osOutFilterX.filter(cursorX, now);
+            osOutY = osOutFilterY.filter(cursorY, now);
 
             // ── Send to backend ──
             if (osWebSocket && osWebSocket.readyState === WebSocket.OPEN) {
