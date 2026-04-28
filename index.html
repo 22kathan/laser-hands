@@ -416,13 +416,12 @@
   <div id="os-instructions">
     <span id="close-os-instructions" style="position: absolute; top: 10px; right: 12px; cursor: pointer; color: rgba(255,255,255,0.4); font-size: 14px;" title="Close instructions">❌</span>
     <h3>🖱️ OS Control Active</h3>
-    <p><span class="key">Move:</span> Index Finger</p>
-    <p><span class="key">Scroll:</span> Index + Middle Fingers</p>
-    <p><span class="key">Zoom:</span> Open/Close Whole Hand</p>
-    <p><span class="key">Hover 2s:</span> Right-click at pointer</p>
-    <p><span class="key">Pinch:</span> Standard Left-click</p>
+    <p><span class="key">Move:</span> Index Finger (point)</p>
+    <p><span class="key">Left Click:</span> Pinch Thumb + Index</p>
+    <p><span class="key">Scroll:</span> Pinch Thumb + Middle</p>
+    <p><span class="key">Right Click:</span> Double-pinch Thumb + Middle</p>
     <p style="margin-top: 8px; font-size: 0.65rem; color: rgba(255,255,255,0.4);">
-      A Picture-in-Picture window will spawn so tracking continues even if you switch tabs! You can move it anywhere.
+      PiP window keeps tracking active across tabs.
     </p>
     <p style="margin-top: 8px; font-size: 0.65rem; color: rgba(255,255,255,0.4);">
       Make sure <i>os_controller.py</i> is running.
@@ -534,7 +533,19 @@
     // --- SMOOTHING CONFIG ---
     let smoothedIndexPos = null;
     let smoothedThumbPos = null;
-    const EMA_ALPHA      = 0.45; // Slightly lower for more stability
+    let smoothedMiddlePos = null;
+    const EMA_ALPHA      = 0.45;
+
+    // --- OS CONTROL STATE ---
+    let osSmoothedX = null;
+    let osSmoothedY = null;
+    let osVelocity = 0;
+    let lastMiddlePinchTime = 0;
+    let middlePinchCount = 0;
+    let wasMiddlePinching = false;
+    let middlePinchReleaseTime = 0;
+    let isScrolling = false;
+    let scrollBaseY = null; // Slightly lower for more stability
 
     function smoothPoint(prev, curr, alpha) {
         if (!prev) return { x: curr.x, y: curr.y };
@@ -1126,8 +1137,6 @@
 
       ctx.save();
       ctx.strokeStyle = `rgba(${c.r},${c.g},${c.b},${0.6 * pulse})`;
-      ctx.shadowColor = `rgba(${c.r},${c.g},${c.b},0.5)`;
-      ctx.shadowBlur = 16;
       ctx.lineWidth = 2;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, 10 * pulse, 0, Math.PI * 2);
@@ -1135,7 +1144,6 @@
 
       // Inner dot
       ctx.fillStyle = `rgba(${c.r},${c.g},${c.b},${0.9 * pulse})`;
-      ctx.shadowBlur = 8;
       ctx.beginPath();
       ctx.arc(pos.x, pos.y, 3, 0, Math.PI * 2);
       ctx.fill();
@@ -1335,30 +1343,20 @@
        Drawing helpers
     ──────────────────────────────────────────── */
 
-    // Neon glow dot with pulse + shadowBlur
-    function drawJointDot(pos, color, radius = 4, label = null) {
-      const pulse = 1 + 0.15 * Math.sin(frameTime * 8);
-      
+    // Tiny neon glow dot — NO shadowBlur for performance
+    function drawJointDot(pos, color, radius = 2.5, label = null) {
+      const pulse = 1 + 0.1 * Math.sin(frameTime * 8);
       ctx.save();
-      // Atmospheric scatter bloom
-      ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.8)`;
-      ctx.shadowBlur = radius * 5;
-      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.12)`;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 4.5 * pulse, 0, Math.PI * 2); ctx.fill();
-      
-      // Vibrant mid layer
-      ctx.shadowBlur = radius * 3;
-      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.65)`;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 1.6 * pulse, 0, Math.PI * 2); ctx.fill();
-
-      // Sharp white-hot core
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 4;
-      ctx.fillStyle = `rgba(255,255,255,0.95)`;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 0.5, 0, Math.PI * 2); ctx.fill();
-      
+      // Soft bloom
+      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.06)`;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 4 * pulse, 0, Math.PI * 2); ctx.fill();
+      // Mid glow
+      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.45)`;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 1.2 * pulse, 0, Math.PI * 2); ctx.fill();
+      // White core
+      ctx.fillStyle = `rgba(255,255,255,0.85)`;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 0.4, 0, Math.PI * 2); ctx.fill();
       if (label) {
-        ctx.shadowBlur = 0;
         ctx.fillStyle = "rgba(255,255,255,0.5)";
         ctx.font = "7px 'Space Grotesk', sans-serif";
         ctx.fillText(label, pos.x + 8, pos.y - 8);
@@ -1366,95 +1364,76 @@
       ctx.restore();
     }
 
-    // Draw skeleton chain with Volumetric 3D cylindrical bones
+    // Draw skeleton chain — ultra-thin wireframe bones
     function drawSkeleton(hand, color, thin = false) {
       ctx.save();
-      const alpha = thin ? 0.15 : 0.3;
+      const alpha = thin ? 0.1 : 0.2;
       
       for (const chain of FINGER_CHAINS) {
         for (let j = 0; j < chain.length - 1; j++) {
           const p1 = lm(hand, chain[j]);
           const p2 = lm(hand, chain[j+1]);
           
-          // Ultra-thin high-tech bones
           ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
-          ctx.lineWidth = thin ? 0.5 : 1.2;
+          ctx.lineWidth = thin ? 0.3 : 0.7;
           ctx.lineCap = "round";
           ctx.beginPath();
           ctx.moveTo(p1.x, p1.y);
           ctx.lineTo(p2.x, p2.y);
           ctx.stroke();
           
-          // Subtle glow layer
-          ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha * 0.5})`;
-          ctx.lineWidth = thin ? 1.5 : 3;
+          // Faint glow layer
+          ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha * 0.3})`;
+          ctx.lineWidth = thin ? 1 : 2;
           ctx.stroke();
         }
       }
       
-      // Palm outline - Ethereal mesh
+      // Palm outline — faint mesh
       ctx.beginPath();
       for (let j = 0; j < PALM_IDS.length; j++) {
         const p = lm(hand, PALM_IDS[j]);
         j === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
       }
       ctx.closePath();
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha * 0.8})`;
-      ctx.lineWidth = 0.8;
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha * 0.6})`;
+      ctx.lineWidth = 0.5;
       ctx.stroke();
       ctx.restore();
     }
 
-    // Laser beam between two points — TRUE GLOWING BEAM with shadowBlur
+    // Laser beam — thin neon line, NO shadowBlur for 60fps
     function drawLaserBeam(a, b, color, distPx) {
       const maxDist = canvas.width * 0.6;
       const t = Math.min(distPx / maxDist, 1);
-      const thickness = 8 - t * 5;
+      const thickness = 2.5 - t * 1.5;
       const pulse = 0.85 + 0.15 * Math.sin(frameTime * 14 + a.x * 0.01);
-      const elasticSag = distPx * 0.05 * Math.sin(frameTime * 2.5 + a.y * 0.005);
+      const elasticSag = distPx * 0.04 * Math.sin(frameTime * 2.5 + a.y * 0.005);
       const midX = (a.x + b.x) / 2;
       const midY = (a.y + b.y) / 2 + elasticSag;
 
       ctx.save();
       ctx.lineCap = 'round';
 
-      // Ultra-wide atmospheric scatter
-      ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.6)`;
-      ctx.shadowBlur = 35 * pulse;
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.12 - t * 0.06) * pulse})`;
-      ctx.lineWidth = thickness + 28;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
-      ctx.stroke();
+      // Wide soft glow
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.06 - t * 0.03) * pulse})`;
+      ctx.lineWidth = thickness + 14;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(midX, midY, b.x, b.y); ctx.stroke();
 
-      // Outer glow bloom
-      ctx.shadowBlur = 22 * pulse;
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.4 - t * 0.15) * pulse})`;
-      ctx.lineWidth = thickness + 8;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
-      ctx.stroke();
+      // Mid glow
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.25 - t * 0.1) * pulse})`;
+      ctx.lineWidth = thickness + 4;
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(midX, midY, b.x, b.y); ctx.stroke();
 
-      // Core beam — saturated color
-      ctx.shadowBlur = 12;
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.95 - t * 0.2) * pulse})`;
+      // Core line
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.9 - t * 0.2) * pulse})`;
       ctx.lineWidth = thickness;
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
-      ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(midX, midY, b.x, b.y); ctx.stroke();
 
-      // Hot white center core
-      ctx.shadowColor = '#ffffff';
-      ctx.shadowBlur = 6;
-      ctx.strokeStyle = `rgba(255,255,255,${(0.9 - t * 0.3) * pulse})`;
-      ctx.lineWidth = Math.max(thickness * 0.3, 1.2);
-      ctx.beginPath();
-      ctx.moveTo(a.x, a.y);
-      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
-      ctx.stroke();
+      // White center hairline
+      ctx.strokeStyle = `rgba(255,255,255,${(0.8 - t * 0.3) * pulse})`;
+      ctx.lineWidth = Math.max(thickness * 0.3, 0.5);
+      ctx.beginPath(); ctx.moveTo(a.x, a.y); ctx.quadraticCurveTo(midX, midY, b.x, b.y); ctx.stroke();
 
       ctx.restore();
     }
@@ -1487,51 +1466,113 @@
         if (isDrawing) { isDrawing = false; lastDrawPos = null; smoothedDrawPos = null; }
           const hand = rightHand || leftHand;
           if (hand) {
-            const rawIndex = hand[8];
-            const rawThumb = hand[4];
-            const rawPinky = hand[20];
-            
-            // Re-use smoothing variables for OS too
-            smoothedIndexPos = smoothPoint(smoothedIndexPos, rawIndex, EMA_ALPHA);
-            
-            const indexTip = smoothedIndexPos;
-            const thumbTip = rawThumb;
-            const pinkyTip = rawPinky;
-            
-            const pinchDist = Math.sqrt(Math.pow(indexTip.x - thumbTip.x, 2) + Math.pow(indexTip.y - thumbTip.y, 2));
-            const handSize = Math.sqrt(Math.pow(pinkyTip.x - thumbTip.x, 2) + Math.pow(pinkyTip.y - thumbTip.y, 2));
-            
-            const iExt = isFingerExtended(hand, 1);
-            const mExt = isFingerExtended(hand, 2);
-            const rExt = isFingerExtended(hand, 3);
-            const pExt = isFingerExtended(hand, 4);
+            // ── Smooth ALL critical landmarks with dual EMA ──
+            const rawIndex  = hand[8];
+            const rawThumb  = hand[4];
+            const rawMiddle = hand[12];
 
+            // OS-specific heavier smoothing for cursor precision
+            const OS_ALPHA = 0.35;
+            smoothedIndexPos  = smoothPoint(smoothedIndexPos,  rawIndex,  OS_ALPHA);
+            smoothedThumbPos  = smoothPoint(smoothedThumbPos,  rawThumb,  OS_ALPHA);
+            smoothedMiddlePos = smoothPoint(smoothedMiddlePos, rawMiddle, OS_ALPHA);
+
+            const indexTip  = smoothedIndexPos;
+            const thumbTip  = smoothedThumbPos;
+            const middleTip = smoothedMiddlePos;
+
+            // ── Pinch detection (normalised coords for resolution independence) ──
+            const indexPinchDist  = Math.sqrt(Math.pow(rawIndex.x - rawThumb.x, 2) + Math.pow(rawIndex.y - rawThumb.y, 2));
+            const middlePinchDist = Math.sqrt(Math.pow(rawMiddle.x - rawThumb.x, 2) + Math.pow(rawMiddle.y - rawThumb.y, 2));
+
+            const isIndexPinching  = indexPinchDist < 0.055;
+            const isMiddlePinching = middlePinchDist < 0.06;
+
+            // ── Gesture classification ──
             let currentGesture = 'move';
             let outY = indexTip.y;
 
-            if (iExt && mExt && rExt && pExt) {
-               currentGesture = 'zoom';
-               outY = handSize;
-            } else if (iExt && mExt && !rExt && !pExt) {
-               currentGesture = 'scroll';
-               outY = (hand[8].y + hand[12].y) / 2.0;
+            // MIDDLE + THUMB PINCH → Scroll or Right-click
+            if (isMiddlePinching) {
+              if (!wasMiddlePinching) {
+                // Pinch just started
+                const now = performance.now();
+                if (now - middlePinchReleaseTime < 400) {
+                  // Double-pinch detected → right-click
+                  middlePinchCount++;
+                } else {
+                  middlePinchCount = 1;
+                }
+                lastMiddlePinchTime = now;
+                wasMiddlePinching = true;
+                scrollBaseY = rawMiddle.y;
+              }
+
+              // If held for >150ms, it's a scroll hold
+              if (performance.now() - lastMiddlePinchTime > 150 && middlePinchCount <= 1) {
+                currentGesture = 'scroll';
+                outY = rawMiddle.y;
+                isScrolling = true;
+              }
+            } else {
+              if (wasMiddlePinching) {
+                // Pinch just released
+                middlePinchReleaseTime = performance.now();
+                const holdDuration = performance.now() - lastMiddlePinchTime;
+
+                if (middlePinchCount >= 2) {
+                  // Double-pinch → right click
+                  currentGesture = 'rightclick';
+                  middlePinchCount = 0;
+                } else if (holdDuration < 150) {
+                  // Very short tap — wait for potential double
+                  // Will be resolved next frame
+                }
+                wasMiddlePinching = false;
+                isScrolling = false;
+                scrollBaseY = null;
+              }
             }
 
+            // ── Enterprise-grade cursor smoothing ──
+            // Second-pass smoothing for OS cursor (dual EMA)
+            const targetX = 1 - indexTip.x;
+            const targetY = indexTip.y;
+
+            if (osSmoothedX === null) {
+              osSmoothedX = targetX;
+              osSmoothedY = targetY;
+            }
+
+            const dx = targetX - osSmoothedX;
+            const dy = targetY - osSmoothedY;
+            const rawDist = Math.sqrt(dx * dx + dy * dy);
+
+            // Deadzone: sub-pixel jitter elimination
+            if (rawDist > 0.001) {
+              // Velocity-adaptive alpha: fast = responsive, slow = ultra-stable
+              const speed = Math.min(rawDist * 100, 10);
+              osVelocity = osVelocity * 0.6 + speed * 0.4;
+              const alpha = Math.max(0.15, Math.min(0.7, 0.2 + osVelocity * 0.05));
+              osSmoothedX += dx * alpha;
+              osSmoothedY += dy * alpha;
+            }
+
+            // ── Send to backend ──
             if (osWebSocket && osWebSocket.readyState === WebSocket.OPEN) {
                osWebSocket.send(JSON.stringify({
                   action: 'tracking',
-                  x: 1 - indexTip.x,
-                  y: outY,
-                  isPinching: pinchDist < 0.055,
+                  x: osSmoothedX,
+                  y: currentGesture === 'scroll' ? outY : osSmoothedY,
+                  isPinching: isIndexPinching,
                   gesture: currentGesture
                }));
             }
+
+            // ── Visual feedback ──
             if (currentGesture === 'scroll') {
                drawCursorIndicator(lm(hand, 12));
-               drawCursorIndicator(lm(hand, 8));
-            } else if (currentGesture === 'zoom') {
                drawCursorIndicator(lm(hand, 4));
-               drawCursorIndicator(lm(hand, 20));
             } else {
                drawCursorIndicator(lm(hand, 8));
             }
@@ -1553,23 +1594,18 @@
         drawHud.classList.remove('visible');
       }
 
-      // ── Background: Deep midnight blue with subtle video silhouette ──
+      // ── Background & Camera Feed ──
       if (appMode === 'write') {
-        ctx.fillStyle = "#050510";
+        ctx.fillStyle = "#000000";
         ctx.fillRect(0, 0, W, H);
       } else {
-        // Deep midnight blue radial gradient
-        const bg = ctx.createRadialGradient(W * 0.5, H * 0.4, 0, W * 0.5, H * 0.5, W * 0.8);
-        bg.addColorStop(0, "#0c1025");
-        bg.addColorStop(0.5, "#080818");
-        bg.addColorStop(1, "#040410");
-        ctx.fillStyle = bg;
+        ctx.fillStyle = "#0a0a14";
         ctx.fillRect(0, 0, W, H);
 
-        // Draw video as a very faint silhouette (ghostly presence)
+        // Clear camera feed (mirrored)
         if (video.readyState >= 2) {
           ctx.save();
-          ctx.globalAlpha = 0.12;
+          ctx.globalAlpha = 0.75;
           ctx.translate(W, 0);
           ctx.scale(-1, 1);
           ctx.drawImage(video, 0, 0, W, H);
@@ -1605,10 +1641,10 @@
           const p = lm(leftHand, id);
           if (isThin) {
             const isReadout = (id === 0); // Wrist data
-            drawJointDot(p, COLORS.cyan, 1.5, isReadout ? `L-WRIST:${Math.floor(p.x)},${Math.floor(p.y)}` : null);
+            drawJointDot(p, COLORS.cyan, 1, isReadout ? `L-WRIST:${Math.floor(p.x)},${Math.floor(p.y)}` : null);
           } else {
             const isTip = FINGERTIP_IDS.includes(id);
-            drawJointDot(p, COLORS.cyan, isTip ? 6 : 3);
+            drawJointDot(p, COLORS.cyan, isTip ? 3.5 : 1.8);
           }
         }
       }
@@ -1634,10 +1670,10 @@
           const p = lm(rightHand, id);
           if (isThin) {
             const isReadout = (id === 0);
-            drawJointDot(p, COLORS.magenta, 1.5, isReadout ? `R-WRIST:${Math.floor(p.x)},${Math.floor(p.y)}` : null);
+            drawJointDot(p, COLORS.magenta, 1, isReadout ? `R-WRIST:${Math.floor(p.x)},${Math.floor(p.y)}` : null);
           } else {
             const isTip = FINGERTIP_IDS.includes(id);
-            drawJointDot(p, COLORS.magenta, isTip ? 6 : 3);
+            drawJointDot(p, COLORS.magenta, isTip ? 3.5 : 1.8);
           }
         }
       }
