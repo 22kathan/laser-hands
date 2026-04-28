@@ -359,7 +359,7 @@
       box-shadow: 0 0 20px rgba(100, 180, 255, 0.1);
       font-family: 'Consolas', monospace;
       color: rgba(255,255,255,0.8);
-      pointer-events: none;
+      pointer-events: auto;
       animation: panelIn 0.3s ease-out;
     }
     #os-instructions.visible { display: flex; }
@@ -536,9 +536,12 @@
     let smoothedMiddlePos = null;
     const EMA_ALPHA      = 0.45;
 
-    // --- OS CONTROL STATE ---
-    let osSmoothedX = null;
-    let osSmoothedY = null;
+    // --- OS CONTROL STATE (normalized 0-1 coords) ---
+    let osSmoothedIndex  = null;  // EMA-smoothed index finger
+    let osSmoothedThumb  = null;  // EMA-smoothed thumb
+    let osSmoothedMiddle = null;  // EMA-smoothed middle finger
+    let osOutX = null;            // Final output X (second-pass smoothed)
+    let osOutY = null;            // Final output Y
     let osVelocity = 0;
     let lastMiddlePinchTime = 0;
     let middlePinchCount = 0;
@@ -1466,22 +1469,31 @@
         if (isDrawing) { isDrawing = false; lastDrawPos = null; smoothedDrawPos = null; }
           const hand = rightHand || leftHand;
           if (hand) {
-            // ── Smooth ALL critical landmarks with dual EMA ──
+            // ── Raw normalized landmarks (0-1 range) ──
             const rawIndex  = hand[8];
             const rawThumb  = hand[4];
             const rawMiddle = hand[12];
 
-            // OS-specific heavier smoothing for cursor precision
-            const OS_ALPHA = 0.35;
-            smoothedIndexPos  = smoothPoint(smoothedIndexPos,  rawIndex,  OS_ALPHA);
-            smoothedThumbPos  = smoothPoint(smoothedThumbPos,  rawThumb,  OS_ALPHA);
-            smoothedMiddlePos = smoothPoint(smoothedMiddlePos, rawMiddle, OS_ALPHA);
+            // ── Inline EMA smoothing for normalized coords ──
+            // (Can't use smoothPoint — it has pixel-space thresholds)
+            const OS_ALPHA = 0.45;
+            if (!osSmoothedIndex) osSmoothedIndex = { x: rawIndex.x, y: rawIndex.y };
+            else {
+              osSmoothedIndex.x += (rawIndex.x - osSmoothedIndex.x) * OS_ALPHA;
+              osSmoothedIndex.y += (rawIndex.y - osSmoothedIndex.y) * OS_ALPHA;
+            }
+            if (!osSmoothedThumb) osSmoothedThumb = { x: rawThumb.x, y: rawThumb.y };
+            else {
+              osSmoothedThumb.x += (rawThumb.x - osSmoothedThumb.x) * OS_ALPHA;
+              osSmoothedThumb.y += (rawThumb.y - osSmoothedThumb.y) * OS_ALPHA;
+            }
+            if (!osSmoothedMiddle) osSmoothedMiddle = { x: rawMiddle.x, y: rawMiddle.y };
+            else {
+              osSmoothedMiddle.x += (rawMiddle.x - osSmoothedMiddle.x) * OS_ALPHA;
+              osSmoothedMiddle.y += (rawMiddle.y - osSmoothedMiddle.y) * OS_ALPHA;
+            }
 
-            const indexTip  = smoothedIndexPos;
-            const thumbTip  = smoothedThumbPos;
-            const middleTip = smoothedMiddlePos;
-
-            // ── Pinch detection (normalised coords for resolution independence) ──
+            // ── Pinch detection (raw coords for responsiveness) ──
             const indexPinchDist  = Math.sqrt(Math.pow(rawIndex.x - rawThumb.x, 2) + Math.pow(rawIndex.y - rawThumb.y, 2));
             const middlePinchDist = Math.sqrt(Math.pow(rawMiddle.x - rawThumb.x, 2) + Math.pow(rawMiddle.y - rawThumb.y, 2));
 
@@ -1490,15 +1502,13 @@
 
             // ── Gesture classification ──
             let currentGesture = 'move';
-            let outY = indexTip.y;
+            let scrollY = rawMiddle.y;
 
             // MIDDLE + THUMB PINCH → Scroll or Right-click
             if (isMiddlePinching) {
               if (!wasMiddlePinching) {
-                // Pinch just started
                 const now = performance.now();
                 if (now - middlePinchReleaseTime < 400) {
-                  // Double-pinch detected → right-click
                   middlePinchCount++;
                 } else {
                   middlePinchCount = 1;
@@ -1507,26 +1517,17 @@
                 wasMiddlePinching = true;
                 scrollBaseY = rawMiddle.y;
               }
-
-              // If held for >150ms, it's a scroll hold
+              // Held > 150ms → scroll mode
               if (performance.now() - lastMiddlePinchTime > 150 && middlePinchCount <= 1) {
                 currentGesture = 'scroll';
-                outY = rawMiddle.y;
                 isScrolling = true;
               }
             } else {
               if (wasMiddlePinching) {
-                // Pinch just released
                 middlePinchReleaseTime = performance.now();
-                const holdDuration = performance.now() - lastMiddlePinchTime;
-
                 if (middlePinchCount >= 2) {
-                  // Double-pinch → right click
                   currentGesture = 'rightclick';
                   middlePinchCount = 0;
-                } else if (holdDuration < 150) {
-                  // Very short tap — wait for potential double
-                  // Will be resolved next frame
                 }
                 wasMiddlePinching = false;
                 isScrolling = false;
@@ -1534,36 +1535,31 @@
               }
             }
 
-            // ── Enterprise-grade cursor smoothing ──
-            // Second-pass smoothing for OS cursor (dual EMA)
-            const targetX = 1 - indexTip.x;
-            const targetY = indexTip.y;
+            // ── Cursor output: mirror X, apply velocity-adaptive smoothing ──
+            const cursorX = 1 - osSmoothedIndex.x;
+            const cursorY = osSmoothedIndex.y;
 
-            if (osSmoothedX === null) {
-              osSmoothedX = targetX;
-              osSmoothedY = targetY;
-            }
+            // Second-pass output smoothing (deadzone for jitter)
+            if (osOutX === null) { osOutX = cursorX; osOutY = cursorY; }
+            const dx = cursorX - osOutX;
+            const dy = cursorY - osOutY;
+            const moveDist = Math.sqrt(dx * dx + dy * dy);
 
-            const dx = targetX - osSmoothedX;
-            const dy = targetY - osSmoothedY;
-            const rawDist = Math.sqrt(dx * dx + dy * dy);
-
-            // Deadzone: sub-pixel jitter elimination
-            if (rawDist > 0.001) {
-              // Velocity-adaptive alpha: fast = responsive, slow = ultra-stable
-              const speed = Math.min(rawDist * 100, 10);
-              osVelocity = osVelocity * 0.6 + speed * 0.4;
-              const alpha = Math.max(0.15, Math.min(0.7, 0.2 + osVelocity * 0.05));
-              osSmoothedX += dx * alpha;
-              osSmoothedY += dy * alpha;
+            if (moveDist > 0.0008) {
+              // Velocity-adaptive: fast = responsive, slow = stable
+              const speed = Math.min(moveDist * 100, 10);
+              osVelocity = osVelocity * 0.5 + speed * 0.5;
+              const outAlpha = Math.max(0.25, Math.min(0.8, 0.3 + osVelocity * 0.06));
+              osOutX += dx * outAlpha;
+              osOutY += dy * outAlpha;
             }
 
             // ── Send to backend ──
             if (osWebSocket && osWebSocket.readyState === WebSocket.OPEN) {
                osWebSocket.send(JSON.stringify({
                   action: 'tracking',
-                  x: osSmoothedX,
-                  y: currentGesture === 'scroll' ? outY : osSmoothedY,
+                  x: osOutX,
+                  y: currentGesture === 'scroll' ? scrollY : osOutY,
                   isPinching: isIndexPinching,
                   gesture: currentGesture
                }));
@@ -1815,7 +1811,9 @@
         isDrawing = false;
         lastDrawPos = null;
         smoothedDrawPos = null;
-        // Muted at user request
+        // Reset OS state
+        osSmoothedIndex = null; osSmoothedThumb = null; osSmoothedMiddle = null;
+        osOutX = null; osOutY = null; osVelocity = 0;
       });
 
       modeWriteBtn.addEventListener('click', () => {
@@ -1831,7 +1829,10 @@
 
       document.getElementById('mode-os').addEventListener('click', async () => {
         appMode = 'os';
-        
+        // Reset OS smoothing for fresh start
+        osSmoothedIndex = null; osSmoothedThumb = null; osSmoothedMiddle = null;
+        osOutX = null; osOutY = null; osVelocity = 0;
+        wasMiddlePinching = false; middlePinchCount = 0;
         const bs = document.getElementById('backend-status');
         if (bs) bs.style.display = 'flex';
         document.getElementById('mode-os').classList.add('active');
