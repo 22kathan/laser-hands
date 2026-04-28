@@ -6,13 +6,13 @@
   <meta http-equiv="Pragma" content="no-cache" />
   <meta http-equiv="Expires" content="0" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Cat's Cradle — Laser Hands (v2) [90 FPS]</title>
+  <title>Cat's Cradle — Laser Hands (v3) [Neon Beams]</title>
   <style>
     * { margin: 0; padding: 0; box-sizing: border-box; }
 
     body {
       overflow: hidden;
-      background: #0a0a1a;
+      background: #080818;
       font-family: 'Segoe UI', system-ui, sans-serif;
       width: 100vw;
       height: 100vh;
@@ -42,10 +42,11 @@
         to bottom,
         transparent 0px,
         transparent 2px,
-        rgba(0, 0, 0, 0.08) 2px,
-        rgba(0, 0, 0, 0.08) 4px
+        rgba(0, 0, 0, 0.12) 2px,
+        rgba(0, 0, 0, 0.12) 4px
       );
       mix-blend-mode: multiply;
+      opacity: 0.6;
     }
 
     /* Subtle vignette */
@@ -533,15 +534,18 @@
     // --- SMOOTHING CONFIG ---
     let smoothedIndexPos = null;
     let smoothedThumbPos = null;
-    const EMA_ALPHA      = 0.55; // Boosted for slightly snappier micro-adjustments
+    const EMA_ALPHA      = 0.45; // Slightly lower for more stability
 
     function smoothPoint(prev, curr, alpha) {
-        if (!prev) return { x: curr.x, y: curr.y }; // INITIAL SNAP
+        if (!prev) return { x: curr.x, y: curr.y };
         
-        // ADAPTIVE SMOOTHING:
         const dist = Math.sqrt(Math.pow(curr.x - prev.x, 2) + Math.pow(curr.y - prev.y, 2));
-        // Use tighter smoothing at low speeds for high-accuracy laser targeting
-        const adaptiveAlpha = Math.max(0.08, Math.min(0.70, alpha * (dist / 10 + 0.1)));
+        
+        // Jitter Threshold: If movement is sub-pixel, keep it perfectly still
+        if (dist < 0.5) return prev;
+
+        // High-precision adaptive smoothing
+        const adaptiveAlpha = Math.max(0.04, Math.min(0.9, alpha * (dist / 6 + 0.02)));
 
         return {
             x: prev.x + (curr.x - prev.x) * adaptiveAlpha,
@@ -971,33 +975,33 @@
 
       if (isRedraw || lastDrawPos) {
         // 90 FPS OPTIMIZATION: Replace expensive shadowBlur with layered glow
-        // Outer glow layer
-        targetCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.15)`;
-        targetCtx.lineWidth = 14;
+        // Outer glow layer - wider but softer
+        targetCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.12)`;
+        targetCtx.lineWidth = 18;
         targetCtx.beginPath();
         targetCtx.moveTo(startX, startY);
         targetCtx.lineTo(x, y);
         targetCtx.stroke();
 
         // Mid glow layer
-        targetCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.35)`;
-        targetCtx.lineWidth = 8;
+        targetCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.3)`;
+        targetCtx.lineWidth = 6;
         targetCtx.beginPath();
         targetCtx.moveTo(startX, startY);
         targetCtx.lineTo(x, y);
         targetCtx.stroke();
 
-        // Core stroke
-        targetCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},0.9)`;
-        targetCtx.lineWidth = 3.5;
+        // Core stroke - thinner and sharper
+        targetCtx.strokeStyle = `rgba(${c.r},${c.g},${c.b},1)`;
+        targetCtx.lineWidth = 1.8;
         targetCtx.beginPath();
         targetCtx.moveTo(startX, startY);
         targetCtx.lineTo(x, y);
         targetCtx.stroke();
         
-        // White highlight for premium feel
-        targetCtx.strokeStyle = `rgba(255,255,255,0.4)`;
-        targetCtx.lineWidth = 1;
+        // White highlight - ultra thin light core
+        targetCtx.strokeStyle = `rgba(255,255,255,0.7)`;
+        targetCtx.lineWidth = 0.6;
         targetCtx.beginPath();
         targetCtx.moveTo(startX, startY);
         targetCtx.lineTo(x, y);
@@ -1287,15 +1291,15 @@
       for (let i = 0; i < count; i++) {
         if (particles.length >= MAX_PARTICLES) particles.shift();
         const angle = Math.random() * Math.PI * 2;
-        const speed = 1.5 + Math.random() * 4;
+        const speed = 2 + Math.random() * 6;
         particles.push({
           x, y,
           vx: Math.cos(angle) * speed,
           vy: Math.sin(angle) * speed,
           life: 1.0,
-          decay: 0.015 + Math.random() * 0.025,
+          decay: 0.012 + Math.random() * 0.022,
           r: color.r, g: color.g, b: color.b,
-          size: 1.5 + Math.random() * 3,
+          size: 2 + Math.random() * 4,
         });
       }
     }
@@ -1305,19 +1309,24 @@
         const p = particles[i];
         p.x += p.vx;
         p.y += p.vy;
-        p.vy += 0.08;          // gentle gravity
-        p.vx *= 0.98;
+        p.vy += 0.06;
+        p.vx *= 0.97;
         p.life -= p.decay;
         if (p.life <= 0) { particles.splice(i, 1); continue; }
 
         const alpha = p.life;
+        const r = p.size * p.life;
         ctx.save();
         ctx.globalAlpha = alpha;
-        // 90 FPS Optimization: No more shadowBlur for particles
-        ctx.fillStyle = `rgba(${p.r},${p.g},${p.b}, 0.8)`;
-        ctx.beginPath();
-        ctx.arc(p.x, p.y, p.size * p.life, 0, Math.PI * 2);
-        ctx.fill();
+        // Outer glow
+        ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},0.2)`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r * 3, 0, Math.PI * 2); ctx.fill();
+        // Core
+        ctx.fillStyle = `rgba(${p.r},${p.g},${p.b},0.9)`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r, 0, Math.PI * 2); ctx.fill();
+        // Hot center
+        ctx.fillStyle = `rgba(255,255,255,${0.7 * alpha})`;
+        ctx.beginPath(); ctx.arc(p.x, p.y, r * 0.35, 0, Math.PI * 2); ctx.fill();
         ctx.restore();
       }
     }
@@ -1326,33 +1335,33 @@
        Drawing helpers
     ──────────────────────────────────────────── */
 
-    // High-Realism Glow dot with pulse effect
-    function drawJointDot(pos, color, radius = 5, label = null) {
-      const pulse = 1 + 0.15 * Math.sin(frameTime * 10);
-      const ring = (frameTime * 2) % 1; // Expanding ring
+    // Neon glow dot with pulse + shadowBlur
+    function drawJointDot(pos, color, radius = 4, label = null) {
+      const pulse = 1 + 0.15 * Math.sin(frameTime * 8);
       
       ctx.save();
-      // Holographic Ring Pulse
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(1-ring) * 0.4})`;
-      ctx.lineWidth = 1;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * (1 + ring * 3), 0, Math.PI * 2); ctx.stroke();
+      // Atmospheric scatter bloom
+      ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.8)`;
+      ctx.shadowBlur = radius * 5;
+      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.12)`;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 4.5 * pulse, 0, Math.PI * 2); ctx.fill();
       
-      // Multi-layered realistic glow
-      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.3)`;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 2.5 * pulse, 0, Math.PI * 2); ctx.fill();
-      
-      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.9)`;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * pulse, 0, Math.PI * 2); ctx.fill();
+      // Vibrant mid layer
+      ctx.shadowBlur = radius * 3;
+      ctx.fillStyle = `rgba(${color.r},${color.g},${color.b},0.65)`;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 1.6 * pulse, 0, Math.PI * 2); ctx.fill();
 
-      // Bright core
-      ctx.fillStyle = `rgba(255,255,255,0.85)`;
-      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 0.4, 0, Math.PI * 2); ctx.fill();
+      // Sharp white-hot core
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 4;
+      ctx.fillStyle = `rgba(255,255,255,0.95)`;
+      ctx.beginPath(); ctx.arc(pos.x, pos.y, radius * 0.5, 0, Math.PI * 2); ctx.fill();
       
-      // Coordinate Readout (Realistic Data HUD)
       if (label) {
-        ctx.fillStyle = "rgba(255,255,255,0.4)";
-        ctx.font = "8px 'Outfit', sans-serif";
-        ctx.fillText(label, pos.x + 10, pos.y - 10);
+        ctx.shadowBlur = 0;
+        ctx.fillStyle = "rgba(255,255,255,0.5)";
+        ctx.font = "7px 'Space Grotesk', sans-serif";
+        ctx.fillText(label, pos.x + 8, pos.y - 8);
       }
       ctx.restore();
     }
@@ -1360,82 +1369,88 @@
     // Draw skeleton chain with Volumetric 3D cylindrical bones
     function drawSkeleton(hand, color, thin = false) {
       ctx.save();
-      const alpha = thin ? 0.2 : 0.4;
+      const alpha = thin ? 0.15 : 0.3;
       
-      // Shadow Projection (Grounding Effect)
-      ctx.shadowColor = "rgba(0,0,0,0.5)";
-      ctx.shadowBlur = 10;
-      ctx.shadowOffsetY = 15;
-
       for (const chain of FINGER_CHAINS) {
         for (let j = 0; j < chain.length - 1; j++) {
           const p1 = lm(hand, chain[j]);
           const p2 = lm(hand, chain[j+1]);
           
-          // Cylindrical Volumetric Gradient
-          const grad = ctx.createLinearGradient(p1.x, p1.y, p2.x, p2.y);
-          grad.addColorStop(0, `rgba(${color.r},${color.g},${color.b},${alpha})`);
-          grad.addColorStop(0.5, `rgba(255,255,255,${alpha * 1.5})`);
-          grad.addColorStop(1, `rgba(${color.r},${color.g},${color.b},${alpha})`);
-          
-          ctx.strokeStyle = grad;
-          ctx.lineWidth = thin ? 1 : 3;
+          // Ultra-thin high-tech bones
+          ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha})`;
+          ctx.lineWidth = thin ? 0.5 : 1.2;
           ctx.lineCap = "round";
           ctx.beginPath();
           ctx.moveTo(p1.x, p1.y);
           ctx.lineTo(p2.x, p2.y);
           ctx.stroke();
           
-          // Outer glow layer for realism
-          ctx.globalAlpha = 0.4;
-          ctx.lineWidth = thin ? 2 : 5;
+          // Subtle glow layer
+          ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha * 0.5})`;
+          ctx.lineWidth = thin ? 1.5 : 3;
           ctx.stroke();
-          ctx.globalAlpha = 1.0;
         }
       }
       
-      // Palm outline with glowing mesh effect
+      // Palm outline - Ethereal mesh
       ctx.beginPath();
       for (let j = 0; j < PALM_IDS.length; j++) {
         const p = lm(hand, PALM_IDS[j]);
         j === 0 ? ctx.moveTo(p.x, p.y) : ctx.lineTo(p.x, p.y);
       }
       ctx.closePath();
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha * 1.5})`;
-      ctx.lineWidth = 1.5;
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${alpha * 0.8})`;
+      ctx.lineWidth = 0.8;
       ctx.stroke();
       ctx.restore();
     }
 
-    // Laser beam between two points
+    // Laser beam between two points — TRUE GLOWING BEAM with shadowBlur
     function drawLaserBeam(a, b, color, distPx) {
       const maxDist = canvas.width * 0.6;
       const t = Math.min(distPx / maxDist, 1);
-      const thickness = 7.5 - t * 4.5;
-      const pulse = 0.9 + 0.1 * Math.sin(frameTime * 12 + a.x * 0.01);
+      const thickness = 8 - t * 5;
+      const pulse = 0.85 + 0.15 * Math.sin(frameTime * 14 + a.x * 0.01);
+      const elasticSag = distPx * 0.05 * Math.sin(frameTime * 2.5 + a.y * 0.005);
       const midX = (a.x + b.x) / 2;
-      const midY = (a.y + b.y) / 2 + distPx * 0.04 * Math.sin(frameTime * 3);
+      const midY = (a.y + b.y) / 2 + elasticSag;
 
       ctx.save();
-      // Outer glow layer (Fast alternative to shadowBlur)
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.2 - t * 0.1) * pulse})`;
-      ctx.lineWidth = thickness + 15;
+      ctx.lineCap = 'round';
+
+      // Ultra-wide atmospheric scatter
+      ctx.shadowColor = `rgba(${color.r},${color.g},${color.b},0.6)`;
+      ctx.shadowBlur = 35 * pulse;
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.12 - t * 0.06) * pulse})`;
+      ctx.lineWidth = thickness + 28;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.quadraticCurveTo(midX, midY, b.x, b.y);
       ctx.stroke();
 
-      // Mid vibrant core layer
-      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.8 - t * 0.3) * pulse})`;
-      ctx.lineWidth = thickness + 4;
+      // Outer glow bloom
+      ctx.shadowBlur = 22 * pulse;
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.4 - t * 0.15) * pulse})`;
+      ctx.lineWidth = thickness + 8;
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.quadraticCurveTo(midX, midY, b.x, b.y);
       ctx.stroke();
 
-      // Hot white center
-      ctx.strokeStyle = `rgba(255,255,255,${(0.9 - t * 0.4) * pulse})`;
-      ctx.lineWidth = Math.max(thickness * 0.4, 1.5);
+      // Core beam — saturated color
+      ctx.shadowBlur = 12;
+      ctx.strokeStyle = `rgba(${color.r},${color.g},${color.b},${(0.95 - t * 0.2) * pulse})`;
+      ctx.lineWidth = thickness;
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.quadraticCurveTo(midX, midY, b.x, b.y);
+      ctx.stroke();
+
+      // Hot white center core
+      ctx.shadowColor = '#ffffff';
+      ctx.shadowBlur = 6;
+      ctx.strokeStyle = `rgba(255,255,255,${(0.9 - t * 0.3) * pulse})`;
+      ctx.lineWidth = Math.max(thickness * 0.3, 1.2);
       ctx.beginPath();
       ctx.moveTo(a.x, a.y);
       ctx.quadraticCurveTo(midX, midY, b.x, b.y);
@@ -1538,20 +1553,23 @@
         drawHud.classList.remove('visible');
       }
 
-      // ── Background & Camera Feed ──
+      // ── Background: Deep midnight blue with subtle video silhouette ──
       if (appMode === 'write') {
-        ctx.fillStyle = "#000000";
+        ctx.fillStyle = "#050510";
         ctx.fillRect(0, 0, W, H);
       } else {
-        const bg = ctx.createRadialGradient(W * 0.5, H * 0.5, 0, W * 0.5, H * 0.5, W * 0.7);
-        bg.addColorStop(0, "#1a1a1a");
-        bg.addColorStop(1, "#000000");
+        // Deep midnight blue radial gradient
+        const bg = ctx.createRadialGradient(W * 0.5, H * 0.4, 0, W * 0.5, H * 0.5, W * 0.8);
+        bg.addColorStop(0, "#0c1025");
+        bg.addColorStop(0.5, "#080818");
+        bg.addColorStop(1, "#040410");
         ctx.fillStyle = bg;
         ctx.fillRect(0, 0, W, H);
 
+        // Draw video as a very faint silhouette (ghostly presence)
         if (video.readyState >= 2) {
           ctx.save();
-          ctx.globalAlpha = 0.7;
+          ctx.globalAlpha = 0.12;
           ctx.translate(W, 0);
           ctx.scale(-1, 1);
           ctx.drawImage(video, 0, 0, W, H);
@@ -1646,12 +1664,15 @@
 
           drawLaserBeam(pL, pR, PALETTE[i], d);
 
-          // Particle explosion on touch + zap sound
+          // Particle EXPLOSION on touch
           const nDist = normDist(leftHand, idL, rightHand, idR);
           if (nDist < TOUCH_DIST_THRESHOLD) {
             const mx = (pL.x + pR.x) / 2;
             const my = (pL.y + pR.y) / 2;
-            spawnParticles(mx, my, PALETTE[i], 6);
+            // Massive burst — 30 particles per finger touch
+            spawnParticles(mx, my, PALETTE[i], 30);
+            // Secondary burst with white for flash effect
+            spawnParticles(mx, my, COLORS.white, 8);
             // playZap(i); // Muted
           }
         }
