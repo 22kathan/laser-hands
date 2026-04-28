@@ -419,7 +419,7 @@
     <p><span class="key">Move:</span> Index Finger (point)</p>
     <p><span class="key">Left Click:</span> Pinch Thumb + Index</p>
     <p><span class="key">Scroll:</span> Pinch Thumb + Middle</p>
-    <p><span class="key">Right Click:</span> Double-pinch Thumb + Middle</p>
+
     <p style="margin-top: 8px; font-size: 0.65rem; color: rgba(255,255,255,0.4);">
       PiP window keeps tracking active across tabs.
     </p>
@@ -1504,31 +1504,20 @@
             let currentGesture = 'move';
             let scrollY = rawMiddle.y;
 
-            // MIDDLE + THUMB PINCH → Scroll or Right-click
+            // MIDDLE + THUMB PINCH → Scroll
             if (isMiddlePinching) {
               if (!wasMiddlePinching) {
-                const now = performance.now();
-                if (now - middlePinchReleaseTime < 400) {
-                  middlePinchCount++;
-                } else {
-                  middlePinchCount = 1;
-                }
-                lastMiddlePinchTime = now;
+                lastMiddlePinchTime = performance.now();
                 wasMiddlePinching = true;
                 scrollBaseY = rawMiddle.y;
               }
               // Held > 150ms → scroll mode
-              if (performance.now() - lastMiddlePinchTime > 150 && middlePinchCount <= 1) {
+              if (performance.now() - lastMiddlePinchTime > 150) {
                 currentGesture = 'scroll';
                 isScrolling = true;
               }
             } else {
               if (wasMiddlePinching) {
-                middlePinchReleaseTime = performance.now();
-                if (middlePinchCount >= 2) {
-                  currentGesture = 'rightclick';
-                  middlePinchCount = 0;
-                }
                 wasMiddlePinching = false;
                 isScrolling = false;
                 scrollBaseY = null;

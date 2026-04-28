@@ -110,7 +110,6 @@ To run again later, use: **Launch Laser Hands.bat** (in Documents/Laser Hands/)
    - ✋ **Move**: Point with open hand
    - 👆 **Left Click**: Pinch thumb + index
    - 🔄 **Drag & Drop**: Move while pinching
-   - ⏸️ **Right Click**: Hover for 1.5 seconds
    - 🔄 **Scroll**: Rotate hand (twist)
    - ✊ **Zoom In**: Close hand
    - ✋ **Zoom Out**: Open hand wide

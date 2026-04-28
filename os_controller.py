@@ -116,11 +116,7 @@ async def handle_connection(websocket):
                             prev_scroll_y = norm_y
                             logging.info(f"✓ Scroll: {clicks} clicks")
 
-                elif gesture == "rightclick":
-                    # Double middle+thumb pinch = right click
-                    pyautogui.rightClick()
-                    logging.info("✓ Right Click (Double Middle Pinch)")
-                    
+
     except websockets.exceptions.ConnectionClosed:
         logging.info("Browser disconnected.")
     except Exception as e:
@@ -142,7 +138,7 @@ async def main():
             print("  • Move:        Index finger (point)")
             print("  • Left Click:  Pinch Thumb + Index")
             print("  • Scroll:      Pinch & hold Thumb + Middle")
-            print("  • Right Click: Double-pinch Thumb + Middle")
+
             
             # Smart HTML Auto-Launch
             html_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "index.html"))
